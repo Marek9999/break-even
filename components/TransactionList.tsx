@@ -1,21 +1,20 @@
 "use client";
 
-import { dummyTransactions, Transaction } from "@/lib/data";
 import { TransactionCard } from "./TransactionCard";
-import { useSplit } from "@/lib/split-context";
+import { useSplit, Transaction } from "@/lib/split-context";
 import { useSettings } from "@/lib/settings-context";
-import { Search } from "lucide-react";
+import { Search, Loader2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { useState, useMemo } from "react";
 import { BankFilterDropdown } from "./BankFilterDropdown";
 
 export function TransactionList() {
-  const { openSplitSheet } = useSplit();
+  const { openSplitSheet, transactions: allTransactions, isLoading } = useSplit();
   const { selectedBankFilter } = useSettings();
   const [searchQuery, setSearchQuery] = useState("");
 
   const filteredTransactions = useMemo(() => {
-    let transactions = dummyTransactions;
+    let transactions = allTransactions;
 
     // Filter by bank account
     if (selectedBankFilter !== "all") {
@@ -36,11 +35,19 @@ export function TransactionList() {
     }
 
     return transactions;
-  }, [searchQuery, selectedBankFilter]);
+  }, [searchQuery, selectedBankFilter, allTransactions]);
 
   const handleTransactionClick = (transaction: Transaction) => {
     openSplitSheet(transaction);
   };
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <Loader2 className="h-8 w-8 animate-spin text-stone-400" />
+      </div>
+    );
+  }
 
   return (
     <div>
@@ -68,7 +75,7 @@ export function TransactionList() {
         ) : (
           filteredTransactions.map((transaction) => (
             <TransactionCard
-              key={transaction.id}
+              key={transaction._id}
               transaction={transaction}
               onClick={() => handleTransactionClick(transaction)}
             />

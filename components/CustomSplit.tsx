@@ -1,7 +1,7 @@
 "use client";
 
 import { useSplit } from "@/lib/split-context";
-import { formatCurrency, getContactById } from "@/lib/data";
+import { formatCurrency } from "@/lib/data";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -11,6 +11,7 @@ import { useMemo } from "react";
 export function CustomSplit() {
   const {
     selectedTransaction,
+    selectedFriends,
     participants,
     updateParticipantAmount,
     setCurrentStep,
@@ -59,22 +60,21 @@ export function CustomSplit() {
 
       {/* Participants */}
       <div className="flex-1 space-y-3">
-        {participants.map((participant) => {
-          const contact = getContactById(participant.contactId);
-          if (!contact) return null;
-
+        {selectedFriends.map((friend, index) => {
+          const participant = participants[index];
+          
           return (
             <div
-              key={participant.contactId}
+              key={friend._id}
               className="p-3 rounded-lg bg-white border border-stone-200"
             >
               <div className="flex items-center gap-3 mb-3">
                 <Avatar className="h-10 w-10">
-                  <AvatarFallback className={`${contact.color} text-white`}>
-                    {contact.initials}
+                  <AvatarFallback className={`${friend.color} text-white`}>
+                    {friend.initials}
                   </AvatarFallback>
                 </Avatar>
-                <p className="font-medium text-stone-900">{contact.name}</p>
+                <p className="font-medium text-stone-900">{friend.name}</p>
               </div>
               <div className="flex items-center gap-2">
                 <span className="text-stone-500">$</span>
@@ -82,10 +82,10 @@ export function CustomSplit() {
                   type="number"
                   min="0"
                   step="0.01"
-                  value={participant.amount || ""}
+                  value={participant?.amount || ""}
                   onChange={(e) =>
                     updateParticipantAmount(
-                      participant.contactId,
+                      friend._id,
                       parseFloat(e.target.value) || 0
                     )
                   }
@@ -112,6 +112,3 @@ export function CustomSplit() {
     </div>
   );
 }
-
-
-

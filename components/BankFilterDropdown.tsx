@@ -30,11 +30,11 @@ export function BankFilterDropdown() {
           </div>
         </SelectItem>
         {bankAccounts.map((account) => (
-          <SelectItem key={account.id} value={account.id}>
+          <SelectItem key={account._id} value={account._id}>
             <div className="flex items-center gap-2 min-w-0 max-w-full">
               <div className={`w-2 h-2 rounded-full shrink-0 ${account.color}`} />
               <span className="truncate min-w-0 flex-1">{account.bankName}</span>
-              <span className="shrink-0 text-stone-500 whitespace-nowrap">(•••• {account.accountNumber})</span>
+              <span className="shrink-0 text-stone-500 whitespace-nowrap">(•••• {account.accountNumberLast4})</span>
             </div>
           </SelectItem>
         ))}

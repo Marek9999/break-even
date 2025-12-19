@@ -1,7 +1,7 @@
 "use client";
 
 import { useSplit } from "@/lib/split-context";
-import { formatCurrency, formatDate, getContactById, categoryConfig } from "@/lib/data";
+import { formatCurrency, formatDate, categoryConfig } from "@/lib/data";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -26,7 +26,7 @@ interface SharePreviewProps {
 export function SharePreview({ open, onOpenChange }: SharePreviewProps) {
   const {
     selectedTransaction,
-    selectedContacts,
+    selectedFriends,
     splitMethod,
     participants,
     receiptItems,
@@ -36,7 +36,11 @@ export function SharePreview({ open, onOpenChange }: SharePreviewProps) {
 
   if (!selectedTransaction) return null;
 
-  const config = categoryConfig[selectedTransaction.category];
+  const config = categoryConfig[selectedTransaction.category as keyof typeof categoryConfig] || {
+    label: selectedTransaction.category,
+    color: "text-stone-600",
+    bgColor: "bg-stone-100",
+  };
 
   const methodLabels = {
     equal: "Equal Split",
@@ -109,35 +113,34 @@ export function SharePreview({ open, onOpenChange }: SharePreviewProps) {
 
             {/* Participants */}
             <h4 className="font-medium text-stone-900 mb-3 text-center">
-              Split Between {selectedContacts.length} People
+              Split Between {selectedFriends.length} People
             </h4>
 
             <div className="space-y-2 mb-4">
-              {participants.map((participant) => {
-                const contact = getContactById(participant.contactId);
-                if (!contact) return null;
+              {selectedFriends.map((friend, index) => {
+                const participant = participants[index];
 
                 return (
                   <div
-                    key={participant.contactId}
+                    key={friend._id}
                     className="flex items-center justify-between p-3 rounded-lg bg-white"
                   >
                     <div className="flex items-center gap-3">
                       <Avatar className="h-8 w-8">
                         <AvatarFallback
-                          className={`${contact.color} text-white text-sm`}
+                          className={`${friend.color} text-white text-sm`}
                         >
-                          {contact.initials}
+                          {friend.initials}
                         </AvatarFallback>
                       </Avatar>
-                      <p className="font-medium text-stone-900">{contact.name}</p>
+                      <p className="font-medium text-stone-900">{friend.name}</p>
                     </div>
                     <div className="text-right">
                       <p className="font-semibold text-stone-900">
-                        {formatCurrency(participant.amount)}
+                        {formatCurrency(participant?.amount || 0)}
                       </p>
                       <p className="text-xs text-stone-500">
-                        {participant.percentage?.toFixed(1)}%
+                        {participant?.percentage?.toFixed(1) || 0}%
                       </p>
                     </div>
                   </div>
@@ -203,6 +206,3 @@ export function SharePreview({ open, onOpenChange }: SharePreviewProps) {
     </Dialog>
   );
 }
-
-
-

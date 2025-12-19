@@ -1,7 +1,7 @@
 "use client";
 
 import { useSplit } from "@/lib/split-context";
-import { formatCurrency, getContactById } from "@/lib/data";
+import { formatCurrency } from "@/lib/data";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -11,7 +11,7 @@ import { useEffect } from "react";
 export function EqualSplit() {
   const {
     selectedTransaction,
-    selectedContacts,
+    selectedFriends,
     participants,
     calculateEqualSplit,
     setCurrentStep,
@@ -24,7 +24,7 @@ export function EqualSplit() {
   if (!selectedTransaction) return null;
 
   const totalAmount = selectedTransaction.amount;
-  const perPersonAmount = totalAmount / selectedContacts.length;
+  const perPersonAmount = selectedFriends.length > 0 ? totalAmount / selectedFriends.length : 0;
 
   return (
     <div className="flex flex-col h-full">
@@ -35,7 +35,7 @@ export function EqualSplit() {
           <h3 className="font-semibold text-stone-900">Equal Split</h3>
         </div>
         <p className="text-sm text-stone-500">
-          Split {formatCurrency(totalAmount)} equally between {selectedContacts.length} people
+          Split {formatCurrency(totalAmount)} equally between {selectedFriends.length} people
         </p>
       </div>
 
@@ -51,30 +51,29 @@ export function EqualSplit() {
 
       {/* Participants */}
       <div className="flex-1 space-y-3">
-        {participants.map((participant) => {
-          const contact = getContactById(participant.contactId);
-          if (!contact) return null;
-
+        {selectedFriends.map((friend, index) => {
+          const participant = participants[index];
+          
           return (
             <div
-              key={participant.contactId}
+              key={friend._id}
               className="flex items-center justify-between p-3 rounded-lg bg-white border border-stone-200"
             >
               <div className="flex items-center gap-3">
                 <Avatar className="h-10 w-10">
-                  <AvatarFallback className={`${contact.color} text-white`}>
-                    {contact.initials}
+                  <AvatarFallback className={`${friend.color} text-white`}>
+                    {friend.initials}
                   </AvatarFallback>
                 </Avatar>
                 <div>
-                  <p className="font-medium text-stone-900">{contact.name}</p>
+                  <p className="font-medium text-stone-900">{friend.name}</p>
                   <p className="text-sm text-stone-500">
-                    {participant.percentage?.toFixed(1)}%
+                    {participant?.percentage?.toFixed(1) || 0}%
                   </p>
                 </div>
               </div>
               <p className="font-semibold text-stone-900">
-                {formatCurrency(participant.amount)}
+                {formatCurrency(participant?.amount || 0)}
               </p>
             </div>
           );
@@ -91,6 +90,3 @@ export function EqualSplit() {
     </div>
   );
 }
-
-
-

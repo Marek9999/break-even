@@ -1,27 +1,79 @@
 "use client";
 
-import React, { createContext, useContext, useState, useCallback, useEffect, ReactNode } from "react";
-import {
-  Transaction,
-  Contact,
-  ReceiptItem,
-  Participant,
-  SplitMethod,
-  SavedSplit,
-  dummyContacts,
-  getContactById,
-} from "./data";
+import React, { createContext, useContext, useState, useCallback, ReactNode } from "react";
+import { useQuery, useMutation } from "convex/react";
+import { api } from "../convex/_generated/api";
+import { Id } from "../convex/_generated/dataModel";
+import { generateInitials, generateAvatarColor } from "./data";
+
+// Types for UI
+export type SplitMethod = "equal" | "percentage" | "custom" | "itemized";
+
+export interface Transaction {
+  _id: Id<"transactions">;
+  merchant: string;
+  amount: number;
+  date: string;
+  category: string;
+  description: string;
+  bankAccountId: Id<"bankAccounts">;
+}
+
+export interface Friend {
+  _id: Id<"users">;
+  name: string;
+  email: string;
+  initials: string;
+  color: string;
+}
+
+export interface ReceiptItem {
+  id: string;
+  name: string;
+  quantity: number;
+  price: number;
+  assignedTo: string[]; // array of friend IDs (as strings for local state)
+}
+
+export interface Participant {
+  oderId: string; // Friend ID as string
+  amount: number;
+  percentage?: number;
+  items?: string[];
+}
+
+export interface SavedSplit {
+  _id: Id<"splits">;
+  transaction: Transaction | null;
+  method: SplitMethod;
+  participants: Array<{
+    oderId: Id<"users">;
+    user: Friend | null;
+    amount: number;
+    percentage: number;
+    status: "pending" | "paid";
+  }>;
+  receiptItems: Array<{
+    _id: Id<"receiptItems">;
+    name: string;
+    quantity: number;
+    price: number;
+    assignedToUserIds: Id<"users">[];
+  }>;
+  status: "pending" | "settled";
+  createdAt: number;
+}
 
 interface SplitState {
   // Current transaction being split
   selectedTransaction: Transaction | null;
-  // Selected contacts to split with
-  selectedContacts: Contact[];
+  // Selected friends to split with
+  selectedFriends: Friend[];
   // Split method
   splitMethod: SplitMethod;
-  // Participants with their amounts
+  // Participants with their amounts (local UI state)
   participants: Participant[];
-  // Receipt items for itemized splits
+  // Receipt items for itemized splits (local UI state)
   receiptItems: ReceiptItem[];
   // Receipt image (base64)
   receiptImage: string | null;
@@ -29,8 +81,6 @@ interface SplitState {
   isSheetOpen: boolean;
   // Current step in the flow
   currentStep: "contacts" | "method" | "configure" | "summary";
-  // Saved splits history
-  savedSplits: SavedSplit[];
   // Currently viewing split detail
   viewingSplit: SavedSplit | null;
   // Detail dialog open
@@ -38,77 +88,101 @@ interface SplitState {
 }
 
 interface SplitContextType extends SplitState {
+  // Data from Convex
+  transactions: Transaction[];
+  savedSplits: SavedSplit[];
+  allFriends: Friend[];
+  isLoading: boolean;
   // Actions
   openSplitSheet: (transaction: Transaction) => void;
   closeSplitSheet: () => void;
-  setSelectedContacts: (contacts: Contact[]) => void;
-  toggleContact: (contact: Contact) => void;
+  setSelectedFriends: (friends: Friend[]) => void;
+  toggleFriend: (friend: Friend) => void;
   setSplitMethod: (method: SplitMethod) => void;
   setParticipants: (participants: Participant[]) => void;
-  updateParticipantAmount: (contactId: string, amount: number) => void;
-  updateParticipantPercentage: (contactId: string, percentage: number) => void;
+  updateParticipantAmount: (friendId: string, amount: number) => void;
+  updateParticipantPercentage: (friendId: string, percentage: number) => void;
   addReceiptItem: (item: Omit<ReceiptItem, "id">) => void;
   updateReceiptItem: (id: string, item: Partial<ReceiptItem>) => void;
   removeReceiptItem: (id: string) => void;
-  assignItemToPerson: (itemId: string, contactId: string) => void;
-  unassignItemFromPerson: (itemId: string, contactId: string) => void;
+  assignItemToPerson: (itemId: string, friendId: string) => void;
+  unassignItemFromPerson: (itemId: string, friendId: string) => void;
   setReceiptImage: (image: string | null) => void;
   setCurrentStep: (step: SplitState["currentStep"]) => void;
   calculateEqualSplit: () => void;
   calculateItemizedSplit: () => void;
   resetSplit: () => void;
   // Saved splits actions
-  saveSplit: () => void;
-  deleteSplit: (id: string) => void;
-  toggleSplitStatus: (id: string) => void;
+  saveSplit: () => Promise<void>;
+  deleteSplit: (id: Id<"splits">) => Promise<void>;
+  toggleSplitStatus: (id: Id<"splits">) => Promise<void>;
   viewSplitDetail: (split: SavedSplit) => void;
   closeSplitDetail: () => void;
-  // Data
-  allContacts: Contact[];
 }
 
 const initialState: SplitState = {
   selectedTransaction: null,
-  selectedContacts: [],
+  selectedFriends: [],
   splitMethod: "equal",
   participants: [],
   receiptItems: [],
   receiptImage: null,
   isSheetOpen: false,
   currentStep: "contacts",
-  savedSplits: [],
   viewingSplit: null,
   isDetailOpen: false,
 };
-
-const STORAGE_KEY = "break-even-splits";
 
 const SplitContext = createContext<SplitContextType | undefined>(undefined);
 
 export function SplitProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<SplitState>(initialState);
 
-  // Load saved splits from localStorage on mount
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) {
-        try {
-          const splits = JSON.parse(saved) as SavedSplit[];
-          setState((prev) => ({ ...prev, savedSplits: splits }));
-        } catch (e) {
-          console.error("Failed to load saved splits:", e);
-        }
-      }
-    }
-  }, []);
+  // Convex queries
+  const transactionsData = useQuery(api.transactions.list);
+  const splitsData = useQuery(api.splits.list);
+  const friendsData = useQuery(api.friendships.listFriends);
 
-  // Save to localStorage whenever savedSplits changes
-  useEffect(() => {
-    if (typeof window !== "undefined" && state.savedSplits.length > 0) {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state.savedSplits));
-    }
-  }, [state.savedSplits]);
+  // Convex mutations
+  const createSplitMutation = useMutation(api.splits.create);
+  const deleteSplitMutation = useMutation(api.splits.remove);
+  const updateSplitStatusMutation = useMutation(api.splits.updateStatus);
+
+  // Transform Convex data
+  const transactions: Transaction[] = (transactionsData ?? []).map((t) => ({
+    _id: t._id,
+    merchant: t.merchant,
+    amount: t.amount,
+    date: t.date,
+    category: t.category,
+    description: t.description,
+    bankAccountId: t.bankAccountId,
+  }));
+
+  const allFriends: Friend[] = (friendsData ?? []).map((f) => {
+    const friend = f.friend;
+    if (!friend) return null;
+    return {
+      _id: friend._id,
+      name: friend.name,
+      email: friend.email,
+      initials: generateInitials(friend.name),
+      color: generateAvatarColor(),
+    };
+  }).filter((f): f is Friend => f !== null);
+
+  // For saved splits, we need to fetch details - for now just show basic info
+  const savedSplits: SavedSplit[] = (splitsData ?? []).map((s) => ({
+    _id: s._id,
+    transaction: transactions.find((t) => t._id === s.transactionId) || null,
+    method: s.method,
+    participants: [], // Would need to fetch from splitParticipants
+    receiptItems: [], // Would need to fetch from receiptItems
+    status: s.status,
+    createdAt: s._creationTime,
+  }));
+
+  const isLoading = transactionsData === undefined || splitsData === undefined || friendsData === undefined;
 
   const openSplitSheet = useCallback((transaction: Transaction) => {
     setState((prev) => ({
@@ -120,18 +194,15 @@ export function SplitProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const closeSplitSheet = useCallback(() => {
-    setState((prev) => ({
-      ...initialState,
-      savedSplits: prev.savedSplits,
-    }));
+    setState(initialState);
   }, []);
 
-  const setSelectedContacts = useCallback((contacts: Contact[]) => {
+  const setSelectedFriends = useCallback((friends: Friend[]) => {
     setState((prev) => ({
       ...prev,
-      selectedContacts: contacts,
-      participants: contacts.map((c) => ({
-        contactId: c.id,
+      selectedFriends: friends,
+      participants: friends.map((f) => ({
+        oderId: f._id,
         amount: 0,
         percentage: 0,
         items: [],
@@ -139,18 +210,18 @@ export function SplitProvider({ children }: { children: ReactNode }) {
     }));
   }, []);
 
-  const toggleContact = useCallback((contact: Contact) => {
+  const toggleFriend = useCallback((friend: Friend) => {
     setState((prev) => {
-      const isSelected = prev.selectedContacts.some((c) => c.id === contact.id);
-      const newContacts = isSelected
-        ? prev.selectedContacts.filter((c) => c.id !== contact.id)
-        : [...prev.selectedContacts, contact];
+      const isSelected = prev.selectedFriends.some((f) => f._id === friend._id);
+      const newFriends = isSelected
+        ? prev.selectedFriends.filter((f) => f._id !== friend._id)
+        : [...prev.selectedFriends, friend];
 
       return {
         ...prev,
-        selectedContacts: newContacts,
-        participants: newContacts.map((c) => ({
-          contactId: c.id,
+        selectedFriends: newFriends,
+        participants: newFriends.map((f) => ({
+          oderId: f._id,
           amount: 0,
           percentage: 0,
           items: [],
@@ -167,22 +238,22 @@ export function SplitProvider({ children }: { children: ReactNode }) {
     setState((prev) => ({ ...prev, participants }));
   }, []);
 
-  const updateParticipantAmount = useCallback((contactId: string, amount: number) => {
+  const updateParticipantAmount = useCallback((friendId: string, amount: number) => {
     setState((prev) => ({
       ...prev,
       participants: prev.participants.map((p) =>
-        p.contactId === contactId ? { ...p, amount } : p
+        p.oderId === friendId ? { ...p, amount } : p
       ),
     }));
   }, []);
 
-  const updateParticipantPercentage = useCallback((contactId: string, percentage: number) => {
+  const updateParticipantPercentage = useCallback((friendId: string, percentage: number) => {
     setState((prev) => {
       const total = prev.selectedTransaction?.amount || 0;
       return {
         ...prev,
         participants: prev.participants.map((p) =>
-          p.contactId === contactId
+          p.oderId === friendId
             ? { ...p, percentage, amount: (percentage / 100) * total }
             : p
         ),
@@ -217,23 +288,23 @@ export function SplitProvider({ children }: { children: ReactNode }) {
     }));
   }, []);
 
-  const assignItemToPerson = useCallback((itemId: string, contactId: string) => {
+  const assignItemToPerson = useCallback((itemId: string, friendId: string) => {
     setState((prev) => ({
       ...prev,
       receiptItems: prev.receiptItems.map((item) =>
         item.id === itemId
-          ? { ...item, assignedTo: [...new Set([...item.assignedTo, contactId])] }
+          ? { ...item, assignedTo: [...new Set([...item.assignedTo, friendId])] }
           : item
       ),
     }));
   }, []);
 
-  const unassignItemFromPerson = useCallback((itemId: string, contactId: string) => {
+  const unassignItemFromPerson = useCallback((itemId: string, friendId: string) => {
     setState((prev) => ({
       ...prev,
       receiptItems: prev.receiptItems.map((item) =>
         item.id === itemId
-          ? { ...item, assignedTo: item.assignedTo.filter((id) => id !== contactId) }
+          ? { ...item, assignedTo: item.assignedTo.filter((id) => id !== friendId) }
           : item
       ),
     }));
@@ -249,17 +320,17 @@ export function SplitProvider({ children }: { children: ReactNode }) {
 
   const calculateEqualSplit = useCallback(() => {
     setState((prev) => {
-      if (!prev.selectedTransaction || prev.selectedContacts.length === 0) return prev;
+      if (!prev.selectedTransaction || prev.selectedFriends.length === 0) return prev;
 
       const totalAmount = prev.selectedTransaction.amount;
-      const numParticipants = prev.selectedContacts.length;
+      const numParticipants = prev.selectedFriends.length;
       const equalAmount = totalAmount / numParticipants;
       const equalPercentage = 100 / numParticipants;
 
       return {
         ...prev,
-        participants: prev.selectedContacts.map((c) => ({
-          contactId: c.id,
+        participants: prev.selectedFriends.map((f) => ({
+          oderId: f._id,
           amount: Math.round(equalAmount * 100) / 100,
           percentage: Math.round(equalPercentage * 100) / 100,
           items: [],
@@ -270,20 +341,20 @@ export function SplitProvider({ children }: { children: ReactNode }) {
 
   const calculateItemizedSplit = useCallback(() => {
     setState((prev) => {
-      if (!prev.selectedTransaction || prev.selectedContacts.length === 0) return prev;
+      if (!prev.selectedTransaction || prev.selectedFriends.length === 0) return prev;
 
       const totals: Record<string, number> = {};
-      prev.selectedContacts.forEach((c) => {
-        totals[c.id] = 0;
+      prev.selectedFriends.forEach((f) => {
+        totals[f._id] = 0;
       });
 
       prev.receiptItems.forEach((item) => {
         if (item.assignedTo.length > 0) {
           const itemTotal = item.quantity * item.price;
           const perPerson = itemTotal / item.assignedTo.length;
-          item.assignedTo.forEach((contactId) => {
-            if (totals[contactId] !== undefined) {
-              totals[contactId] += perPerson;
+          item.assignedTo.forEach((friendId) => {
+            if (totals[friendId] !== undefined) {
+              totals[friendId] += perPerson;
             }
           });
         }
@@ -293,91 +364,60 @@ export function SplitProvider({ children }: { children: ReactNode }) {
 
       return {
         ...prev,
-        participants: prev.selectedContacts.map((c) => ({
-          contactId: c.id,
-          amount: Math.round(totals[c.id] * 100) / 100,
+        participants: prev.selectedFriends.map((f) => ({
+          oderId: f._id,
+          amount: Math.round(totals[f._id] * 100) / 100,
           percentage: transactionTotal > 0 
-            ? Math.round((totals[c.id] / transactionTotal) * 10000) / 100 
+            ? Math.round((totals[f._id] / transactionTotal) * 10000) / 100 
             : 0,
           items: prev.receiptItems
-            .filter((item) => item.assignedTo.includes(c.id))
+            .filter((item) => item.assignedTo.includes(f._id))
             .map((item) => item.id),
         })),
       };
     });
   }, []);
 
-  const saveSplit = useCallback(() => {
-    setState((prev) => {
-      if (!prev.selectedTransaction || prev.participants.length === 0) return prev;
+  const saveSplit = useCallback(async () => {
+    if (!state.selectedTransaction || state.participants.length === 0) return;
 
-      const newSplit: SavedSplit = {
-        id: `split-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-        transaction: prev.selectedTransaction,
-        method: prev.splitMethod,
-        participants: prev.participants.map((p) => ({
-          contact: getContactById(p.contactId) || prev.selectedContacts.find(c => c.id === p.contactId)!,
-          amount: p.amount,
-          percentage: p.percentage || 0,
-        })),
-        items: prev.receiptItems,
-        receiptImage: prev.receiptImage || undefined,
-        createdAt: new Date().toISOString(),
-        status: "pending",
-      };
+    const receiptItems = state.splitMethod === "itemized" ? state.receiptItems.map((item) => ({
+      name: item.name,
+      quantity: item.quantity,
+      price: item.price,
+      assignedToUserIds: item.assignedTo as Id<"users">[],
+    })) : undefined;
 
-      const newSavedSplits = [newSplit, ...prev.savedSplits];
-      
-      // Save to localStorage
-      if (typeof window !== "undefined") {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(newSavedSplits));
-      }
-
-      return {
-        ...initialState,
-        savedSplits: newSavedSplits,
-      };
+    await createSplitMutation({
+      transactionId: state.selectedTransaction._id,
+      method: state.splitMethod,
+      participants: state.participants.map((p) => ({
+        userId: p.oderId as Id<"users">,
+        amount: p.amount,
+        percentage: p.percentage,
+      })),
+      receiptItems,
     });
-  }, []);
 
-  const deleteSplit = useCallback((id: string) => {
-    setState((prev) => {
-      const newSavedSplits = prev.savedSplits.filter((s) => s.id !== id);
-      
-      if (typeof window !== "undefined") {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(newSavedSplits));
-      }
+    setState(initialState);
+  }, [state.selectedTransaction, state.participants, state.splitMethod, state.receiptItems, createSplitMutation]);
 
-      return {
-        ...prev,
-        savedSplits: newSavedSplits,
-        isDetailOpen: prev.viewingSplit?.id === id ? false : prev.isDetailOpen,
-        viewingSplit: prev.viewingSplit?.id === id ? null : prev.viewingSplit,
-      };
-    });
-  }, []);
+  const deleteSplit = useCallback(async (id: Id<"splits">) => {
+    await deleteSplitMutation({ splitId: id });
+    setState((prev) => ({
+      ...prev,
+      isDetailOpen: prev.viewingSplit?._id === id ? false : prev.isDetailOpen,
+      viewingSplit: prev.viewingSplit?._id === id ? null : prev.viewingSplit,
+    }));
+  }, [deleteSplitMutation]);
 
-  const toggleSplitStatus = useCallback((id: string) => {
-    setState((prev) => {
-      const newSavedSplits = prev.savedSplits.map((s) =>
-        s.id === id
-          ? { ...s, status: s.status === "pending" ? "settled" : "pending" as const }
-          : s
-      );
-      
-      if (typeof window !== "undefined") {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(newSavedSplits));
-      }
-
-      return {
-        ...prev,
-        savedSplits: newSavedSplits,
-        viewingSplit: prev.viewingSplit?.id === id 
-          ? { ...prev.viewingSplit, status: prev.viewingSplit.status === "pending" ? "settled" : "pending" as const }
-          : prev.viewingSplit,
-      };
-    });
-  }, []);
+  const toggleSplitStatus = useCallback(async (id: Id<"splits">) => {
+    const split = savedSplits.find((s) => s._id === id);
+    if (!split) return;
+    
+    const newStatus = split.status === "pending" ? "settled" : "pending";
+    await updateSplitStatusMutation({ splitId: id, status: newStatus });
+  }, [savedSplits, updateSplitStatusMutation]);
 
   const viewSplitDetail = useCallback((split: SavedSplit) => {
     setState((prev) => ({
@@ -396,18 +436,19 @@ export function SplitProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const resetSplit = useCallback(() => {
-    setState((prev) => ({
-      ...initialState,
-      savedSplits: prev.savedSplits,
-    }));
+    setState(initialState);
   }, []);
 
   const value: SplitContextType = {
     ...state,
+    transactions,
+    savedSplits,
+    allFriends,
+    isLoading,
     openSplitSheet,
     closeSplitSheet,
-    setSelectedContacts,
-    toggleContact,
+    setSelectedFriends,
+    toggleFriend,
     setSplitMethod,
     setParticipants,
     updateParticipantAmount,
@@ -427,7 +468,6 @@ export function SplitProvider({ children }: { children: ReactNode }) {
     toggleSplitStatus,
     viewSplitDetail,
     closeSplitDetail,
-    allContacts: dummyContacts,
   };
 
   return <SplitContext.Provider value={value}>{children}</SplitContext.Provider>;

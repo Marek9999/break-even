@@ -1,7 +1,7 @@
 "use client";
 
 import { useSplit } from "@/lib/split-context";
-import { formatCurrency, getContactById } from "@/lib/data";
+import { formatCurrency } from "@/lib/data";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -11,6 +11,7 @@ import { useMemo } from "react";
 export function PercentageSplit() {
   const {
     selectedTransaction,
+    selectedFriends,
     participants,
     updateParticipantPercentage,
     setCurrentStep,
@@ -59,26 +60,25 @@ export function PercentageSplit() {
 
       {/* Participants */}
       <div className="flex-1 space-y-3">
-        {participants.map((participant) => {
-          const contact = getContactById(participant.contactId);
-          if (!contact) return null;
-
+        {selectedFriends.map((friend, index) => {
+          const participant = participants[index];
+          
           return (
             <div
-              key={participant.contactId}
+              key={friend._id}
               className="p-3 rounded-lg bg-white border border-stone-200"
             >
               <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-3">
                   <Avatar className="h-10 w-10">
-                    <AvatarFallback className={`${contact.color} text-white`}>
-                      {contact.initials}
+                    <AvatarFallback className={`${friend.color} text-white`}>
+                      {friend.initials}
                     </AvatarFallback>
                   </Avatar>
-                  <p className="font-medium text-stone-900">{contact.name}</p>
+                  <p className="font-medium text-stone-900">{friend.name}</p>
                 </div>
                 <p className="font-semibold text-stone-900">
-                  {formatCurrency(participant.amount)}
+                  {formatCurrency(participant?.amount || 0)}
                 </p>
               </div>
               <div className="flex items-center gap-2">
@@ -87,10 +87,10 @@ export function PercentageSplit() {
                   min="0"
                   max="100"
                   step="0.1"
-                  value={participant.percentage || ""}
+                  value={participant?.percentage || ""}
                   onChange={(e) =>
                     updateParticipantPercentage(
-                      participant.contactId,
+                      friend._id,
                       parseFloat(e.target.value) || 0
                     )
                   }
@@ -118,6 +118,3 @@ export function PercentageSplit() {
     </div>
   );
 }
-
-
-

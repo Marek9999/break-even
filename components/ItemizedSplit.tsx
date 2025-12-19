@@ -1,7 +1,7 @@
 "use client";
 
 import { useSplit } from "@/lib/split-context";
-import { formatCurrency, getContactById } from "@/lib/data";
+import { formatCurrency } from "@/lib/data";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -16,12 +16,12 @@ import {
   X,
   Users,
 } from "lucide-react";
-import { useRef, useEffect } from "react";
+import { useRef } from "react";
 
 export function ItemizedSplit() {
   const {
     selectedTransaction,
-    selectedContacts,
+    selectedFriends,
     receiptItems,
     receiptImage,
     removeReceiptItem,
@@ -164,24 +164,24 @@ export function ItemizedSplit() {
                     Assign to:
                   </p>
                   <div className="flex flex-wrap gap-1">
-                    {selectedContacts.map((contact) => {
-                      const isAssigned = item.assignedTo.includes(contact.id);
+                    {selectedFriends.map((friend) => {
+                      const isAssigned = item.assignedTo.includes(friend._id);
                       return (
                         <Badge
-                          key={contact.id}
+                          key={friend._id}
                           variant={isAssigned ? "default" : "outline"}
                           className={`cursor-pointer transition-all ${
                             isAssigned
-                              ? `${contact.color} text-white border-transparent`
+                              ? `${friend.color} text-white border-transparent`
                               : "hover:bg-stone-100"
                           }`}
                           onClick={() =>
                             isAssigned
-                              ? unassignItemFromPerson(item.id, contact.id)
-                              : assignItemToPerson(item.id, contact.id)
+                              ? unassignItemFromPerson(item.id, friend._id)
+                              : assignItemToPerson(item.id, friend._id)
                           }
                         >
-                          {contact.initials}
+                          {friend.initials}
                         </Badge>
                       );
                     })}
@@ -218,6 +218,3 @@ export function ItemizedSplit() {
     </div>
   );
 }
-
-
-

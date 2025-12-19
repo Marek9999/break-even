@@ -1,7 +1,7 @@
 "use client";
 
 import { useSplit } from "@/lib/split-context";
-import { formatCurrency, formatDate, getContactById, categoryConfig } from "@/lib/data";
+import { formatCurrency, formatDate, categoryConfig } from "@/lib/data";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -22,7 +22,7 @@ import { SharePreview } from "./SharePreview";
 export function SplitSummary() {
   const {
     selectedTransaction,
-    selectedContacts,
+    selectedFriends,
     splitMethod,
     participants,
     receiptItems,
@@ -31,10 +31,15 @@ export function SplitSummary() {
   } = useSplit();
 
   const [showSharePreview, setShowSharePreview] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
 
   if (!selectedTransaction) return null;
 
-  const config = categoryConfig[selectedTransaction.category];
+  const config = categoryConfig[selectedTransaction.category as keyof typeof categoryConfig] || {
+    label: selectedTransaction.category,
+    color: "text-stone-600",
+    bgColor: "bg-stone-100",
+  };
   const totalAssigned = participants.reduce((sum, p) => sum + p.amount, 0);
 
   const methodLabels = {
@@ -43,6 +48,19 @@ export function SplitSummary() {
     custom: "Custom Split",
     itemized: "Itemized Split",
   };
+
+  const handleSave = async () => {
+    setIsSaving(true);
+    try {
+      await saveSplit();
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // Helper to find friend by ID
+  const getFriendById = (friendId: string) => 
+    selectedFriends.find((f) => f._id === friendId);
 
   return (
     <>
@@ -93,34 +111,33 @@ export function SplitSummary() {
 
         {/* Participants Breakdown */}
         <h4 className="font-medium text-stone-900 mb-3">
-          Split Breakdown ({selectedContacts.length} people)
+          Split Breakdown ({selectedFriends.length} people)
         </h4>
 
         <div className="space-y-2 mb-4">
-          {participants.map((participant) => {
-            const contact = getContactById(participant.contactId);
-            if (!contact) return null;
-
+          {selectedFriends.map((friend, index) => {
+            const participant = participants[index];
+            
             return (
               <div
-                key={participant.contactId}
+                key={friend._id}
                 className="flex items-center justify-between p-3 rounded-lg bg-white border border-stone-200"
               >
                 <div className="flex items-center gap-3">
                   <Avatar className="h-10 w-10">
-                    <AvatarFallback className={`${contact.color} text-white`}>
-                      {contact.initials}
+                    <AvatarFallback className={`${friend.color} text-white`}>
+                      {friend.initials}
                     </AvatarFallback>
                   </Avatar>
                   <div>
-                    <p className="font-medium text-stone-900">{contact.name}</p>
+                    <p className="font-medium text-stone-900">{friend.name}</p>
                     <p className="text-sm text-stone-500">
-                      {participant.percentage?.toFixed(1)}% of total
+                      {participant?.percentage?.toFixed(1) || 0}% of total
                     </p>
                   </div>
                 </div>
                 <p className="font-semibold text-stone-900">
-                  {formatCurrency(participant.amount)}
+                  {formatCurrency(participant?.amount || 0)}
                 </p>
               </div>
             );
@@ -159,18 +176,18 @@ export function SplitSummary() {
                       </TableCell>
                       <TableCell>
                         <div className="flex -space-x-1">
-                          {item.assignedTo.map((contactId) => {
-                            const contact = getContactById(contactId);
-                            if (!contact) return null;
+                          {item.assignedTo.map((friendId) => {
+                            const friend = getFriendById(friendId);
+                            if (!friend) return null;
                             return (
                               <Avatar
-                                key={contactId}
+                                key={friendId}
                                 className="h-6 w-6 border-2 border-white"
                               >
                                 <AvatarFallback
-                                  className={`${contact.color} text-white text-xs`}
+                                  className={`${friend.color} text-white text-xs`}
                                 >
-                                  {contact.initials}
+                                  {friend.initials}
                                 </AvatarFallback>
                               </Avatar>
                             );
@@ -206,9 +223,9 @@ export function SplitSummary() {
             <Share2 className="mr-2 h-4 w-4" />
             Share Split
           </Button>
-          <Button variant="outline" className="w-full" onClick={saveSplit}>
+          <Button variant="outline" className="w-full" onClick={handleSave} disabled={isSaving}>
             <Save className="mr-2 h-4 w-4" />
-            Save & Done
+            {isSaving ? "Saving..." : "Save & Done"}
           </Button>
         </div>
       </div>
@@ -217,4 +234,3 @@ export function SplitSummary() {
     </>
   );
 }
-

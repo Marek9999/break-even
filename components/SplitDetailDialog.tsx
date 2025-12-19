@@ -32,15 +32,22 @@ import {
   Check,
 } from "lucide-react";
 import { useState } from "react";
+import { generateInitials, generateAvatarColor } from "@/lib/data";
 
 export function SplitDetailDialog() {
   const { viewingSplit, isDetailOpen, closeSplitDetail, toggleSplitStatus, deleteSplit } =
     useSplit();
   const [copied, setCopied] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [isUpdating, setIsUpdating] = useState(false);
 
-  if (!viewingSplit) return null;
+  if (!viewingSplit || !viewingSplit.transaction) return null;
 
-  const config = categoryConfig[viewingSplit.transaction.category];
+  const config = categoryConfig[viewingSplit.transaction.category as keyof typeof categoryConfig] || {
+    label: viewingSplit.transaction.category,
+    color: "text-stone-600",
+    bgColor: "bg-stone-100",
+  };
 
   const methodLabels = {
     equal: "Equal Split",
@@ -51,15 +58,29 @@ export function SplitDetailDialog() {
 
   const handleCopyLink = () => {
     navigator.clipboard.writeText(
-      `${window.location.origin}/split/${viewingSplit.id}`
+      `${window.location.origin}/split/${viewingSplit._id}`
     );
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
     if (confirm("Are you sure you want to delete this split?")) {
-      deleteSplit(viewingSplit.id);
+      setIsDeleting(true);
+      try {
+        await deleteSplit(viewingSplit._id);
+      } finally {
+        setIsDeleting(false);
+      }
+    }
+  };
+
+  const handleToggleStatus = async () => {
+    setIsUpdating(true);
+    try {
+      await toggleSplitStatus(viewingSplit._id);
+    } finally {
+      setIsUpdating(false);
     }
   };
 
@@ -131,41 +152,58 @@ export function SplitDetailDialog() {
             Participants ({viewingSplit.participants.length})
           </h4>
           <div className="space-y-2 mb-4">
-            {viewingSplit.participants.map((participant) => (
-              <div
-                key={participant.contact.id}
-                className="flex items-center justify-between p-3 rounded-lg bg-white border border-stone-200"
-              >
-                <div className="flex items-center gap-3">
-                  <Avatar className="h-10 w-10">
-                    <AvatarFallback
-                      className={`${participant.contact.color} text-white`}
-                    >
-                      {participant.contact.initials}
-                    </AvatarFallback>
-                  </Avatar>
-                  <div>
-                    <p className="font-medium text-stone-900">
-                      {participant.contact.name}
-                    </p>
-                    <p className="text-sm text-stone-500">
-                      {participant.percentage.toFixed(1)}%
-                    </p>
+            {viewingSplit.participants.length === 0 ? (
+              <p className="text-sm text-stone-500 text-center py-4">
+                Participant details will be loaded here
+              </p>
+            ) : (
+              viewingSplit.participants.map((participant) => {
+                const initials = participant.user ? generateInitials(participant.user.name) : "?";
+                const color = participant.user ? generateAvatarColor() : "bg-stone-400";
+                
+                return (
+                  <div
+                    key={participant.oderId}
+                    className="flex items-center justify-between p-3 rounded-lg bg-white border border-stone-200"
+                  >
+                    <div className="flex items-center gap-3">
+                      <Avatar className="h-10 w-10">
+                        <AvatarFallback className={`${color} text-white`}>
+                          {initials}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div>
+                        <p className="font-medium text-stone-900">
+                          {participant.user?.name || "Unknown"}
+                        </p>
+                        <p className="text-sm text-stone-500">
+                          {participant.percentage.toFixed(1)}%
+                        </p>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <p className="font-semibold text-stone-900">
+                        {formatCurrency(participant.amount)}
+                      </p>
+                      <Badge 
+                        variant="outline" 
+                        className={participant.status === "paid" ? "text-emerald-600 border-emerald-300" : "text-amber-600 border-amber-300"}
+                      >
+                        {participant.status}
+                      </Badge>
+                    </div>
                   </div>
-                </div>
-                <p className="font-semibold text-stone-900">
-                  {formatCurrency(participant.amount)}
-                </p>
-              </div>
-            ))}
+                );
+              })
+            )}
           </div>
 
           {/* Items for itemized splits */}
-          {viewingSplit.method === "itemized" && viewingSplit.items.length > 0 && (
+          {viewingSplit.method === "itemized" && viewingSplit.receiptItems.length > 0 && (
             <>
               <h4 className="font-medium text-stone-900 mb-3 flex items-center gap-2">
                 <Receipt className="h-4 w-4" />
-                Items ({viewingSplit.items.length})
+                Items ({viewingSplit.receiptItems.length})
               </h4>
               <Card className="mb-4 overflow-hidden">
                 <Table>
@@ -177,8 +215,8 @@ export function SplitDetailDialog() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {viewingSplit.items.map((item) => (
-                      <TableRow key={item.id}>
+                    {viewingSplit.receiptItems.map((item) => (
+                      <TableRow key={item._id}>
                         <TableCell>
                           <div>
                             <p className="font-medium">{item.name}</p>
@@ -193,44 +231,15 @@ export function SplitDetailDialog() {
                           {formatCurrency(item.quantity * item.price)}
                         </TableCell>
                         <TableCell>
-                          <div className="flex -space-x-1">
-                            {item.assignedTo.map((contactId) => {
-                              const participant = viewingSplit.participants.find(
-                                (p) => p.contact.id === contactId
-                              );
-                              if (!participant) return null;
-                              return (
-                                <Avatar
-                                  key={contactId}
-                                  className="h-6 w-6 border-2 border-white"
-                                >
-                                  <AvatarFallback
-                                    className={`${participant.contact.color} text-white text-xs`}
-                                  >
-                                    {participant.contact.initials}
-                                  </AvatarFallback>
-                                </Avatar>
-                              );
-                            })}
-                          </div>
+                          <span className="text-sm text-stone-500">
+                            {item.assignedToUserIds.length} people
+                          </span>
                         </TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
                 </Table>
               </Card>
-            </>
-          )}
-
-          {/* Receipt Image */}
-          {viewingSplit.receiptImage && (
-            <>
-              <h4 className="font-medium text-stone-900 mb-3">Receipt Image</h4>
-              <img
-                src={viewingSplit.receiptImage}
-                alt="Receipt"
-                className="w-full rounded-lg border mb-4"
-              />
             </>
           )}
         </ScrollArea>
@@ -241,17 +250,18 @@ export function SplitDetailDialog() {
             <Button
               variant={isPending ? "default" : "outline"}
               className="flex-1"
-              onClick={() => toggleSplitStatus(viewingSplit.id)}
+              onClick={handleToggleStatus}
+              disabled={isUpdating}
             >
               {isPending ? (
                 <>
                   <CheckCircle2 className="mr-2 h-4 w-4" />
-                  Mark as Settled
+                  {isUpdating ? "Updating..." : "Mark as Settled"}
                 </>
               ) : (
                 <>
                   <Clock className="mr-2 h-4 w-4" />
-                  Mark as Pending
+                  {isUpdating ? "Updating..." : "Mark as Pending"}
                 </>
               )}
             </Button>
@@ -267,15 +277,13 @@ export function SplitDetailDialog() {
             variant="ghost"
             className="text-red-500 hover:text-red-600 hover:bg-red-50"
             onClick={handleDelete}
+            disabled={isDeleting}
           >
             <Trash2 className="mr-2 h-4 w-4" />
-            Delete Split
+            {isDeleting ? "Deleting..." : "Delete Split"}
           </Button>
         </div>
       </DialogContent>
     </Dialog>
   );
 }
-
-
-

@@ -5,10 +5,18 @@ import { formatCurrency, formatDate, categoryConfig } from "@/lib/data";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { History, Receipt, Users, CheckCircle2, Clock } from "lucide-react";
+import { History, Receipt, Users, CheckCircle2, Clock, Loader2 } from "lucide-react";
 
 export function SplitHistory() {
-  const { savedSplits, viewSplitDetail } = useSplit();
+  const { savedSplits, viewSplitDetail, isLoading } = useSplit();
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <Loader2 className="h-8 w-8 animate-spin text-stone-400" />
+      </div>
+    );
+  }
 
   if (savedSplits.length === 0) {
     return (
@@ -45,10 +53,11 @@ export function SplitHistory() {
           </div>
           <div className="space-y-3">
             {pendingSplits.map((split) => {
-              const config = categoryConfig[split.transaction.category];
+              if (!split.transaction) return null;
+              const config = categoryConfig[split.transaction.category as keyof typeof categoryConfig];
               return (
                 <Card
-                  key={split.id}
+                  key={split._id}
                   className="p-4 cursor-pointer transition-all hover:shadow-md hover:scale-[1.01] active:scale-[0.99] border-amber-200 bg-amber-50/30"
                   onClick={() => viewSplitDetail(split)}
                 >
@@ -75,35 +84,14 @@ export function SplitHistory() {
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <Users className="h-4 w-4 text-stone-400" />
-                      <div className="flex -space-x-2">
-                        {split.participants.slice(0, 4).map((p) => (
-                          <Avatar
-                            key={p.contact.id}
-                            className="h-7 w-7 border-2 border-white"
-                          >
-                            <AvatarFallback
-                              className={`${p.contact.color} text-white text-xs`}
-                            >
-                              {p.contact.initials}
-                            </AvatarFallback>
-                          </Avatar>
-                        ))}
-                        {split.participants.length > 4 && (
-                          <div className="h-7 w-7 rounded-full bg-stone-200 border-2 border-white flex items-center justify-center">
-                            <span className="text-xs text-stone-600">
-                              +{split.participants.length - 4}
-                            </span>
-                          </div>
-                        )}
-                      </div>
                       <span className="text-sm text-stone-500">
                         {split.participants.length} people
                       </span>
                     </div>
-                    {split.method === "itemized" && (
+                    {split.method === "itemized" && split.receiptItems.length > 0 && (
                       <div className="flex items-center gap-1 text-stone-400">
                         <Receipt className="h-4 w-4" />
-                        <span className="text-xs">{split.items.length} items</span>
+                        <span className="text-xs">{split.receiptItems.length} items</span>
                       </div>
                     )}
                   </div>
@@ -125,10 +113,11 @@ export function SplitHistory() {
           </div>
           <div className="space-y-3">
             {settledSplits.map((split) => {
-              const config = categoryConfig[split.transaction.category];
+              if (!split.transaction) return null;
+              const config = categoryConfig[split.transaction.category as keyof typeof categoryConfig];
               return (
                 <Card
-                  key={split.id}
+                  key={split._id}
                   className="p-4 cursor-pointer transition-all hover:shadow-md hover:scale-[1.01] active:scale-[0.99] border-stone-200 opacity-75"
                   onClick={() => viewSplitDetail(split)}
                 >
@@ -155,27 +144,6 @@ export function SplitHistory() {
                   {/* Participants */}
                   <div className="flex items-center gap-2">
                     <Users className="h-4 w-4 text-stone-400" />
-                    <div className="flex -space-x-2">
-                      {split.participants.slice(0, 4).map((p) => (
-                        <Avatar
-                          key={p.contact.id}
-                          className="h-7 w-7 border-2 border-white"
-                        >
-                          <AvatarFallback
-                            className={`${p.contact.color} text-white text-xs`}
-                          >
-                            {p.contact.initials}
-                          </AvatarFallback>
-                        </Avatar>
-                      ))}
-                      {split.participants.length > 4 && (
-                        <div className="h-7 w-7 rounded-full bg-stone-200 border-2 border-white flex items-center justify-center">
-                          <span className="text-xs text-stone-600">
-                            +{split.participants.length - 4}
-                          </span>
-                        </div>
-                      )}
-                    </div>
                     <span className="text-sm text-stone-500">
                       {split.participants.length} people
                     </span>

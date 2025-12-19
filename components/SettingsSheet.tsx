@@ -31,8 +31,10 @@ import {
   Phone,
   ChevronRight,
   Settings,
+  LogOut,
 } from "lucide-react";
 import { useState, useEffect } from "react";
+import { useClerk } from "@clerk/nextjs";
 
 export function SettingsSheet() {
   const {
@@ -41,10 +43,13 @@ export function SettingsSheet() {
     user,
     updateUser,
     bankAccounts,
-    contacts,
-    openContactForm,
-    removeContact,
+    friends,
+    openFriendForm,
+    removeFriend,
+    isLoading,
   } = useSettings();
+
+  const { signOut } = useClerk();
 
   const [editingProfile, setEditingProfile] = useState(false);
   const [profileForm, setProfileForm] = useState({
@@ -67,10 +72,10 @@ export function SettingsSheet() {
     setEditingProfile(false);
   };
 
-  const handleDeleteContact = (id: string, name: string) => {
-    if (confirm(`Are you sure you want to remove ${name} from your contacts?`)) {
-      removeContact(id);
-    }
+  // Note: Friend removal would need friendship ID, not user ID
+  // For now, this is a placeholder - the friend system uses friendship IDs
+  const handleDeleteFriend = (friendName: string) => {
+    alert(`Friend removal requires the friendship ID. This will be implemented with the friend management UI.`);
   };
 
   return (
@@ -211,7 +216,7 @@ export function SettingsSheet() {
 
               <div className="space-y-2">
                 {bankAccounts.map((account) => (
-                  <Card key={account.id} className="p-4">
+                  <Card key={account._id} className="p-4">
                     <div className="flex items-center gap-4">
                       <div
                         className={`flex items-center justify-center w-12 h-12 rounded-xl ${account.color} text-white`}
@@ -230,7 +235,7 @@ export function SettingsSheet() {
                           </Badge>
                         </div>
                         <p className="text-sm text-stone-500">
-                          •••• {account.accountNumber}
+                          •••• {account.accountNumberLast4}
                         </p>
                       </div>
                       <div className="text-right">
@@ -253,49 +258,45 @@ export function SettingsSheet() {
               </div>
             </section>
 
-            {/* Contacts Section */}
+            {/* Friends Section */}
             <section>
               <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-2">
                   <Users className="h-5 w-5 text-stone-600" />
                   <h3 className="font-semibold text-stone-900">
-                    Contacts ({contacts.length})
+                    Friends ({friends.length})
                   </h3>
                 </div>
-                <Button size="sm" onClick={() => openContactForm()}>
+                <Button size="sm" onClick={() => openFriendForm()} disabled>
                   <Plus className="mr-1 h-4 w-4" />
                   Add
                 </Button>
               </div>
 
               <div className="space-y-2">
-                {contacts.length === 0 ? (
+                {friends.length === 0 ? (
                   <Card className="p-8 text-center">
                     <Users className="h-8 w-8 mx-auto mb-2 text-stone-300" />
-                    <p className="text-stone-500">No contacts yet</p>
-                    <Button
-                      variant="link"
-                      className="mt-2"
-                      onClick={() => openContactForm()}
-                    >
-                      Add your first contact
-                    </Button>
+                    <p className="text-stone-500">No friends yet</p>
+                    <p className="text-xs text-stone-400 mt-2">
+                      Friends will appear here once you connect with other users
+                    </p>
                   </Card>
                 ) : (
-                  contacts.map((contact) => (
-                    <Card key={contact.id} className="p-3">
+                  friends.map((friend) => (
+                    <Card key={friend._id} className="p-3">
                       <div className="flex items-center gap-3">
                         <Avatar className="h-10 w-10">
-                          <AvatarFallback className={`${contact.color} text-white`}>
-                            {contact.initials}
+                          <AvatarFallback className={`${friend.color} text-white`}>
+                            {friend.initials}
                           </AvatarFallback>
                         </Avatar>
                         <div className="flex-1 min-w-0">
                           <p className="font-medium text-stone-900 truncate">
-                            {contact.name}
+                            {friend.name}
                           </p>
                           <p className="text-sm text-stone-500 truncate">
-                            {contact.email}
+                            {friend.email}
                           </p>
                         </div>
                         <div className="flex items-center gap-1">
@@ -303,15 +304,7 @@ export function SettingsSheet() {
                             variant="ghost"
                             size="icon"
                             className="h-8 w-8"
-                            onClick={() => openContactForm(contact)}
-                          >
-                            <Pencil className="h-4 w-4 text-stone-500" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8"
-                            onClick={() => handleDeleteContact(contact.id, contact.name)}
+                            onClick={() => handleDeleteFriend(friend.name)}
                           >
                             <Trash2 className="h-4 w-4 text-red-500" />
                           </Button>
@@ -321,6 +314,19 @@ export function SettingsSheet() {
                   ))
                 )}
               </div>
+            </section>
+
+            {/* Logout Section */}
+            <Separator className="my-4" />
+            <section>
+              <Button
+                variant="destructive"
+                className="w-full"
+                onClick={() => signOut({ redirectUrl: "/sign-in" })}
+              >
+                <LogOut className="mr-2 h-4 w-4" />
+                Log Out
+              </Button>
             </section>
           </div>
         </ScrollArea>

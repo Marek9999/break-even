@@ -1,6 +1,8 @@
 "use client";
 
-import { Transaction, formatCurrency, formatDate, categoryConfig, getBankAccountById } from "@/lib/data";
+import { Transaction } from "@/lib/split-context";
+import { useSettings } from "@/lib/settings-context";
+import { formatCurrency, formatDate, categoryConfig } from "@/lib/data";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -12,7 +14,7 @@ import {
   ShoppingCart,
 } from "lucide-react";
 
-const categoryIcons: Record<Transaction["category"], React.ReactNode> = {
+const categoryIcons: Record<string, React.ReactNode> = {
   food: <Utensils className="h-4 w-4" />,
   shopping: <ShoppingBag className="h-4 w-4" />,
   utilities: <Zap className="h-4 w-4" />,
@@ -27,8 +29,13 @@ interface TransactionCardProps {
 }
 
 export function TransactionCard({ transaction, onClick }: TransactionCardProps) {
-  const config = categoryConfig[transaction.category];
-  const bankAccount = getBankAccountById(transaction.bankAccountId);
+  const { bankAccounts } = useSettings();
+  const config = categoryConfig[transaction.category as keyof typeof categoryConfig] || {
+    label: transaction.category,
+    color: "text-stone-600",
+    bgColor: "bg-stone-100",
+  };
+  const bankAccount = bankAccounts.find((b) => b._id === transaction.bankAccountId);
 
   return (
     <Card

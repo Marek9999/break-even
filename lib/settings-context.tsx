@@ -1,51 +1,80 @@
 "use client";
 
-import React, { createContext, useContext, useState, useCallback, useEffect, ReactNode } from "react";
+import React, { createContext, useContext, useState, useCallback, ReactNode } from "react";
 import { useUser } from "@clerk/nextjs";
+import { useQuery, useMutation, useConvexAuth } from "convex/react";
+import { api } from "../convex/_generated/api";
+import { Id } from "../convex/_generated/dataModel";
 import {
-  User,
-  BankAccount,
-  Contact,
-  dummyBankAccounts,
-  dummyContacts,
   generateInitials,
   generateAvatarColor,
 } from "./data";
 
+// Types for UI state (matching Convex data structure)
+interface User {
+  id: string;
+  name: string;
+  email: string;
+  phone: string;
+  avatar?: string;
+}
+
+interface BankAccount {
+  _id: Id<"bankAccounts">;
+  bankName: string;
+  accountNumberLast4: string;
+  accountType: "checking" | "savings" | "credit";
+  balance: number;
+  color: string;
+}
+
+interface Friend {
+  _id: Id<"users">;
+  name: string;
+  email: string;
+  phone?: string;
+  avatarUrl?: string;
+  // UI helpers
+  initials: string;
+  color: string;
+}
+
 interface SettingsState {
   // User profile
   user: User;
-  // Bank accounts
-  bankAccounts: BankAccount[];
-  // Contacts list
-  contacts: Contact[];
   // Settings sheet open state
   isSettingsOpen: boolean;
-  // Currently editing contact
-  editingContact: Contact | null;
-  // Contact form dialog open
-  isContactFormOpen: boolean;
+  // Currently editing friend
+  editingFriend: Friend | null;
+  // Friend form dialog open
+  isFriendFormOpen: boolean;
   // Selected bank account filter ("all" or bank ID)
   selectedBankFilter: string;
 }
 
 interface SettingsContextType extends SettingsState {
+  // Data from Convex
+  bankAccounts: BankAccount[];
+  friends: Friend[];
+  isLoading: boolean;
   // Settings sheet
   openSettings: () => void;
   closeSettings: () => void;
   // User actions
   updateUser: (user: Partial<User>) => void;
-  // Contact actions
-  addContact: (contact: Omit<Contact, "id" | "initials" | "color">) => void;
-  updateContact: (id: string, contact: Partial<Contact>) => void;
-  removeContact: (id: string) => void;
-  openContactForm: (contact?: Contact) => void;
-  closeContactForm: () => void;
+  // Friend actions (using friendship system)
+  sendFriendRequest: (addresseeId: Id<"users">) => Promise<void>;
+  acceptFriendRequest: (friendshipId: Id<"friendships">) => Promise<void>;
+  removeFriend: (friendshipId: Id<"friendships">) => Promise<void>;
+  openFriendForm: (friend?: Friend) => void;
+  closeFriendForm: () => void;
+  // Bank account actions
+  addBankAccount: (account: Omit<BankAccount, "_id">) => Promise<void>;
+  updateBankAccount: (id: Id<"bankAccounts">, updates: Partial<BankAccount>) => Promise<void>;
+  removeBankAccount: (id: Id<"bankAccounts">) => Promise<void>;
   // Bank filter
   setBankFilter: (filter: string) => void;
 }
-
-const STORAGE_KEY_CONTACTS = "break-even-contacts";
 
 const defaultUser: User = {
   id: "",
@@ -56,11 +85,9 @@ const defaultUser: User = {
 
 const initialState: SettingsState = {
   user: defaultUser,
-  bankAccounts: dummyBankAccounts,
-  contacts: dummyContacts,
   isSettingsOpen: false,
-  editingContact: null,
-  isContactFormOpen: false,
+  editingFriend: null,
+  isFriendFormOpen: false,
   selectedBankFilter: "all",
 };
 
@@ -68,10 +95,42 @@ const SettingsContext = createContext<SettingsContextType | undefined>(undefined
 
 export function SettingsProvider({ children }: { children: ReactNode }) {
   const { user: clerkUser, isLoaded } = useUser();
+  const { isAuthenticated, isLoading: isConvexAuthLoading } = useConvexAuth();
   const [state, setState] = useState<SettingsState>(initialState);
 
-  // Sync Clerk user data to state
-  useEffect(() => {
+  // Convex queries
+  const convexUser = useQuery(api.users.me);
+  const bankAccountsData = useQuery(api.bankAccounts.list);
+  const friendsData = useQuery(api.friendships.listFriends);
+
+  // Convex mutations
+  const getOrCreateUser = useMutation(api.users.getOrCreate);
+  const sendFriendRequestMutation = useMutation(api.friendships.sendRequest);
+  const acceptFriendRequestMutation = useMutation(api.friendships.acceptRequest);
+  const removeFriendMutation = useMutation(api.friendships.remove);
+  const createBankAccount = useMutation(api.bankAccounts.create);
+  const updateBankAccountMutation = useMutation(api.bankAccounts.update);
+  const removeBankAccountMutation = useMutation(api.bankAccounts.remove);
+
+  // Ensure user exists in Convex on first load
+  // Only call when:
+  // 1. Clerk has loaded and user is signed in
+  // 2. Convex auth is ready and authenticated
+  // 3. The convexUser query has completed (not undefined) and returned null (user doesn't exist)
+  React.useEffect(() => {
+    if (
+      isLoaded &&
+      clerkUser &&
+      !isConvexAuthLoading &&
+      isAuthenticated &&
+      convexUser === null
+    ) {
+      getOrCreateUser().catch(console.error);
+    }
+  }, [isLoaded, clerkUser, isConvexAuthLoading, isAuthenticated, convexUser, getOrCreateUser]);
+
+  // Sync Clerk user data to local state
+  React.useEffect(() => {
     if (isLoaded && clerkUser) {
       const fullName = [clerkUser.firstName, clerkUser.lastName].filter(Boolean).join(" ") || "User";
       const primaryEmail = clerkUser.emailAddresses[0]?.emailAddress || "";
@@ -90,26 +149,24 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     }
   }, [isLoaded, clerkUser]);
 
-  // Load contacts from localStorage on mount
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      const savedContacts = localStorage.getItem(STORAGE_KEY_CONTACTS);
-      
-      if (savedContacts) {
-        setState((prev) => ({
-          ...prev,
-          contacts: JSON.parse(savedContacts),
-        }));
-      }
-    }
-  }, []);
+  // Transform Convex data to UI format
+  const bankAccounts: BankAccount[] = bankAccountsData ?? [];
+  
+  const friends: Friend[] = (friendsData ?? []).map((f) => {
+    const friend = f.friend;
+    if (!friend) return null;
+    return {
+      _id: friend._id,
+      name: friend.name,
+      email: friend.email,
+      phone: friend.phone,
+      avatarUrl: friend.avatarUrl,
+      initials: generateInitials(friend.name),
+      color: generateAvatarColor(),
+    };
+  }).filter((f): f is Friend => f !== null);
 
-  // Save contacts to localStorage
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      localStorage.setItem(STORAGE_KEY_CONTACTS, JSON.stringify(state.contacts));
-    }
-  }, [state.contacts]);
+  const isLoading = bankAccountsData === undefined || friendsData === undefined;
 
   const openSettings = useCallback(() => {
     setState((prev) => ({ ...prev, isSettingsOpen: true }));
@@ -126,60 +183,45 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     }));
   }, []);
 
-  const addContact = useCallback((contact: Omit<Contact, "id" | "initials" | "color">) => {
-    const newContact: Contact = {
-      ...contact,
-      id: `c-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-      initials: generateInitials(contact.name),
-      color: generateAvatarColor(),
-    };
+  const sendFriendRequest = useCallback(async (addresseeId: Id<"users">) => {
+    await sendFriendRequestMutation({ addresseeId });
+  }, [sendFriendRequestMutation]);
+
+  const acceptFriendRequest = useCallback(async (friendshipId: Id<"friendships">) => {
+    await acceptFriendRequestMutation({ friendshipId });
+  }, [acceptFriendRequestMutation]);
+
+  const removeFriend = useCallback(async (friendshipId: Id<"friendships">) => {
+    await removeFriendMutation({ friendshipId });
+  }, [removeFriendMutation]);
+
+  const openFriendForm = useCallback((friend?: Friend) => {
     setState((prev) => ({
       ...prev,
-      contacts: [...prev.contacts, newContact],
-      isContactFormOpen: false,
-      editingContact: null,
+      editingFriend: friend || null,
+      isFriendFormOpen: true,
     }));
   }, []);
 
-  const updateContact = useCallback((id: string, updates: Partial<Contact>) => {
+  const closeFriendForm = useCallback(() => {
     setState((prev) => ({
       ...prev,
-      contacts: prev.contacts.map((c) =>
-        c.id === id
-          ? {
-              ...c,
-              ...updates,
-              initials: updates.name ? generateInitials(updates.name) : c.initials,
-            }
-          : c
-      ),
-      isContactFormOpen: false,
-      editingContact: null,
+      editingFriend: null,
+      isFriendFormOpen: false,
     }));
   }, []);
 
-  const removeContact = useCallback((id: string) => {
-    setState((prev) => ({
-      ...prev,
-      contacts: prev.contacts.filter((c) => c.id !== id),
-    }));
-  }, []);
+  const addBankAccount = useCallback(async (account: Omit<BankAccount, "_id">) => {
+    await createBankAccount(account);
+  }, [createBankAccount]);
 
-  const openContactForm = useCallback((contact?: Contact) => {
-    setState((prev) => ({
-      ...prev,
-      editingContact: contact || null,
-      isContactFormOpen: true,
-    }));
-  }, []);
+  const updateBankAccount = useCallback(async (id: Id<"bankAccounts">, updates: Partial<BankAccount>) => {
+    await updateBankAccountMutation({ bankAccountId: id, ...updates });
+  }, [updateBankAccountMutation]);
 
-  const closeContactForm = useCallback(() => {
-    setState((prev) => ({
-      ...prev,
-      editingContact: null,
-      isContactFormOpen: false,
-    }));
-  }, []);
+  const removeBankAccount = useCallback(async (id: Id<"bankAccounts">) => {
+    await removeBankAccountMutation({ bankAccountId: id });
+  }, [removeBankAccountMutation]);
 
   const setBankFilter = useCallback((filter: string) => {
     setState((prev) => ({ ...prev, selectedBankFilter: filter }));
@@ -187,14 +229,20 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
 
   const value: SettingsContextType = {
     ...state,
+    bankAccounts,
+    friends,
+    isLoading,
     openSettings,
     closeSettings,
     updateUser,
-    addContact,
-    updateContact,
-    removeContact,
-    openContactForm,
-    closeContactForm,
+    sendFriendRequest,
+    acceptFriendRequest,
+    removeFriend,
+    openFriendForm,
+    closeFriendForm,
+    addBankAccount,
+    updateBankAccount,
+    removeBankAccount,
     setBankFilter,
   };
 
@@ -208,4 +256,3 @@ export function useSettings() {
   }
   return context;
 }
-
