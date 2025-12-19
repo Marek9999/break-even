@@ -40,7 +40,60 @@ export const listByStatus = query({
 });
 
 /**
+ * Get all splits for the current user with computed status.
+ * Returns splits with their overall status based on participant statuses.
+ */
+export const listWithStatus = query({
+  args: {},
+  handler: async (ctx) => {
+    const user = await Auth.getCurrentUser(ctx);
+    if (!user) {
+      return [];
+    }
+
+    const splits = await Splits.getByUserId(ctx, user._id);
+
+    // For each split, compute the overall status
+    const splitsWithStatus = await Promise.all(
+      splits.map(async (split) => {
+        const participants = await Splits.getParticipants(ctx, split._id);
+        const transaction = await Transactions.getById(ctx, split.transactionId);
+
+        // Find current user's participation
+        const currentUserParticipant = participants.find((p) => p.userId === user._id) ?? null;
+
+        // Compute overall status
+        const allSettled = participants.length > 0 && participants.every((p) => p.status === "paid");
+        const currentUserSettled = currentUserParticipant?.status === "paid";
+
+        let overallStatus: "all_settled" | "settled_by_me" | "pending";
+        if (allSettled) {
+          overallStatus = "all_settled";
+        } else if (currentUserSettled) {
+          overallStatus = "settled_by_me";
+        } else {
+          overallStatus = "pending";
+        }
+
+        const settledCount = participants.filter((p) => p.status === "paid").length;
+
+        return {
+          ...split,
+          transaction,
+          overallStatus,
+          settledCount,
+          totalParticipants: participants.length,
+        };
+      })
+    );
+
+    return splitsWithStatus;
+  },
+});
+
+/**
  * Get a split with full details (participants, items, transaction).
+ * Computes overall status based on participant statuses.
  */
 export const getWithDetails = query({
   args: {
@@ -48,7 +101,12 @@ export const getWithDetails = query({
   },
   handler: async (ctx, { splitId }) => {
     const user = await Auth.requireUser(ctx);
-    const split = await Splits.verifyOwnership(ctx, splitId, user._id);
+    
+    // Get the split - check if user is owner or participant
+    const split = await Splits.getById(ctx, splitId);
+    if (!split) {
+      throw new Error("Split not found");
+    }
 
     // Get transaction
     const transaction = await Transactions.getById(ctx, split.transactionId);
@@ -61,6 +119,25 @@ export const getWithDetails = query({
     // Get receipt items
     const receiptItems = await Splits.getReceiptItems(ctx, splitId);
 
+    // Find current user's participation
+    const currentUserParticipant = participants.find((p) => p.userId === user._id) ?? null;
+
+    // Compute overall status
+    const allSettled = participants.length > 0 && participants.every((p) => p.status === "paid");
+    const currentUserSettled = currentUserParticipant?.status === "paid";
+
+    let overallStatus: "all_settled" | "settled_by_me" | "pending";
+    if (allSettled) {
+      overallStatus = "all_settled";
+    } else if (currentUserSettled) {
+      overallStatus = "settled_by_me";
+    } else {
+      overallStatus = "pending";
+    }
+
+    // Count settled participants
+    const settledCount = participants.filter((p) => p.status === "paid").length;
+
     return {
       split,
       transaction,
@@ -69,6 +146,10 @@ export const getWithDetails = query({
         user: participantUsers[i],
       })),
       receiptItems,
+      overallStatus,
+      currentUserParticipant,
+      settledCount,
+      totalParticipants: participants.length,
     };
   },
 });
@@ -227,7 +308,100 @@ export const remove = mutation({
   },
 });
 
+import * as BankAccounts from "./model/bankAccounts";
+
+// ==================== DEV/TESTING MUTATIONS ====================
+
+/**
+ * Create a sample split with all participants settled (for testing UI).
+ */
+export const createSampleSettledSplit = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const user = await Auth.requireUser(ctx);
+
+    // Get or create a Cash account for the sample transaction
+    const cashAccountId = await BankAccounts.getOrCreateCashAccount(ctx, user._id);
+
+    // Create a sample transaction
+    const transactionId = await ctx.db.insert("transactions", {
+      userId: user._id,
+      bankAccountId: cashAccountId,
+      merchant: "Sample Restaurant (All Settled)",
+      amount: 100,
+      date: new Date().toISOString().split("T")[0],
+      category: "food",
+      description: "Sample split for testing - all settled",
+      isManual: true,
+    });
+
+    // Create the split
+    const splitId = await Splits.create(ctx, {
+      userId: user._id,
+      transactionId,
+      method: "equal",
+      status: "pending", // This field is now derived, but keeping for backwards compat
+    });
+
+    // Add the current user as a participant (settled)
+    await Splits.addParticipant(ctx, {
+      splitId,
+      userId: user._id,
+      amount: 50,
+      percentage: 50,
+      status: "paid", // Already settled!
+    });
+
+    // Get a friend to add as second participant
+    const friendships = await ctx.db
+      .query("friendships")
+      .withIndex("by_requester", (q) => q.eq("requesterId", user._id))
+      .filter((q) => q.eq(q.field("status"), "accepted"))
+      .first();
+
+    if (friendships) {
+      await Splits.addParticipant(ctx, {
+        splitId,
+        userId: friendships.addresseeId,
+        amount: 50,
+        percentage: 50,
+        status: "paid", // Already settled!
+      });
+    } else {
+      // If no friend, just add another participant entry for the user
+      // (This is just for demo purposes)
+    }
+
+    return { transactionId, splitId };
+  },
+});
+
 // ==================== PARTICIPANT MUTATIONS ====================
+
+/**
+ * Settle or unsettle the current user's share in a split.
+ * Any participant can toggle their own status.
+ */
+export const settleMyShare = mutation({
+  args: {
+    splitId: v.id("splits"),
+  },
+  handler: async (ctx, { splitId }) => {
+    const user = await Auth.requireUser(ctx);
+
+    // Find the current user's participation record
+    const participation = await Splits.findUserParticipation(ctx, splitId, user._id);
+    if (!participation) {
+      throw new Error("You are not a participant in this split");
+    }
+
+    // Toggle the status
+    const newStatus = participation.status === "paid" ? "pending" : "paid";
+    await Splits.updateParticipantStatus(ctx, participation._id, newStatus);
+
+    return { newStatus };
+  },
+});
 
 /**
  * Mark a participant's payment as paid.

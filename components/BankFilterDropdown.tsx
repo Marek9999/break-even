@@ -29,15 +29,21 @@ export function BankFilterDropdown() {
             All Accounts
           </div>
         </SelectItem>
-        {bankAccounts.map((account) => (
-          <SelectItem key={account._id} value={account._id}>
-            <div className="flex items-center gap-2 min-w-0 max-w-full">
-              <div className={`w-2 h-2 rounded-full shrink-0 ${account.color}`} />
-              <span className="truncate min-w-0 flex-1">{account.bankName}</span>
-              <span className="shrink-0 text-stone-500 whitespace-nowrap">(•••• {account.accountNumberLast4})</span>
-            </div>
-          </SelectItem>
-        ))}
+        {bankAccounts.map((account) => {
+          // Don't show account number for Cash accounts (manual transactions)
+          const isCashAccount = account.bankName === "Cash" && !account.plaidItemId;
+          return (
+            <SelectItem key={account._id} value={account._id}>
+              <div className="flex items-center gap-2 min-w-0 max-w-full">
+                <div className={`w-2 h-2 rounded-full shrink-0 ${account.color}`} />
+                <span className="truncate min-w-0 flex-1">{account.bankName}</span>
+                {!isCashAccount && (
+                  <span className="shrink-0 text-stone-500 whitespace-nowrap">(•••• {account.accountNumberLast4})</span>
+                )}
+              </div>
+            </SelectItem>
+          );
+        })}
       </SelectContent>
     </Select>
   );

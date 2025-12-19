@@ -163,3 +163,36 @@ export async function verifyOwnership(
   }
   return account;
 }
+
+/**
+ * Get or create a virtual "Cash" bank account for manual transactions.
+ * This account is used to store cash/manual transactions that aren't linked to a real bank.
+ */
+export async function getOrCreateCashAccount(
+  ctx: MutationCtx,
+  userId: Id<"users">
+): Promise<Id<"bankAccounts">> {
+  // Look for an existing cash account (identified by bankName = "Cash")
+  const existingAccounts = await ctx.db
+    .query("bankAccounts")
+    .withIndex("by_userId", (q) => q.eq("userId", userId))
+    .collect();
+
+  const cashAccount = existingAccounts.find(
+    (account) => account.bankName === "Cash" && !account.plaidItemId
+  );
+
+  if (cashAccount) {
+    return cashAccount._id;
+  }
+
+  // Create a new cash account
+  return await ctx.db.insert("bankAccounts", {
+    userId,
+    bankName: "Cash",
+    accountNumberLast4: "0000",
+    accountType: "checking",
+    balance: 0,
+    color: "bg-emerald-500",
+  });
+}

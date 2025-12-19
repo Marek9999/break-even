@@ -10,7 +10,16 @@ import { Search, Users, ArrowRight, Loader2 } from "lucide-react";
 import { useState, useMemo } from "react";
 
 export function ContactSelector() {
-  const { selectedFriends, toggleFriend, setCurrentStep, allFriends, isLoading } = useSplit();
+  const { 
+    selectedFriends, 
+    toggleFriend, 
+    setCurrentStep, 
+    allFriends, 
+    isLoading,
+    includeSelf,
+    setIncludeSelf,
+    currentUser,
+  } = useSplit();
   const { openFriendForm } = useSettings();
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -56,6 +65,32 @@ export function ContactSelector() {
           Choose who you want to split this transaction with
         </p>
       </div>
+
+      {/* Include Myself Toggle */}
+      {currentUser && (
+        <div
+          className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-colors mb-4 border ${
+            includeSelf
+              ? "bg-blue-50 border-blue-200"
+              : "bg-stone-50 border-stone-200 hover:bg-stone-100"
+          }`}
+          onClick={() => setIncludeSelf(!includeSelf)}
+        >
+          <Checkbox
+            checked={includeSelf}
+            onCheckedChange={() => setIncludeSelf(!includeSelf)}
+          />
+          <Avatar className="h-10 w-10">
+            <AvatarFallback className="bg-blue-500 text-white">
+              {currentUser.initials}
+            </AvatarFallback>
+          </Avatar>
+          <div className="flex-1 min-w-0">
+            <p className="font-medium text-stone-900">Include myself</p>
+            <p className="text-sm text-stone-500 truncate">You • {currentUser.email}</p>
+          </div>
+        </div>
+      )}
 
       {/* Search */}
       <div className="relative mb-4">

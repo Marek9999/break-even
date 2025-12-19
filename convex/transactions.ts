@@ -3,6 +3,7 @@ import { v } from "convex/values";
 import * as Auth from "./model/auth";
 import * as Transactions from "./model/transactions";
 import * as BankAccounts from "./model/bankAccounts";
+import * as Splits from "./model/splits";
 
 /**
  * Get all transactions for the current user, sorted by date (newest first).
@@ -136,5 +137,103 @@ export const bulkCreateFromPlaid = mutation({
       bankAccountId,
       transactions
     );
+  },
+});
+
+/**
+ * Create a manual (cash) transaction with a split atomically.
+ * This ensures a manual transaction cannot exist without a split.
+ */
+export const createManualWithSplit = mutation({
+  args: {
+    // Transaction data
+    merchant: v.string(),
+    amount: v.number(),
+    date: v.optional(v.string()),
+    category: v.optional(v.string()),
+    description: v.optional(v.string()),
+    // Split data
+    method: v.union(
+      v.literal("equal"),
+      v.literal("percentage"),
+      v.literal("custom"),
+      v.literal("itemized")
+    ),
+    participants: v.array(
+      v.object({
+        userId: v.id("users"),
+        amount: v.number(),
+        percentage: v.optional(v.number()),
+      })
+    ),
+    receiptItems: v.optional(
+      v.array(
+        v.object({
+          name: v.string(),
+          quantity: v.number(),
+          price: v.number(),
+          assignedToUserIds: v.array(v.id("users")),
+        })
+      )
+    ),
+    receiptImageId: v.optional(v.id("_storage")),
+  },
+  handler: async (ctx, args) => {
+    const user = await Auth.requireUser(ctx);
+
+    // Validate participants
+    if (args.participants.length === 0) {
+      throw new Error("At least one participant is required");
+    }
+
+    // 1. Get or create the Cash bank account
+    const cashAccountId = await BankAccounts.getOrCreateCashAccount(
+      ctx,
+      user._id
+    );
+
+    // 2. Create the manual transaction
+    const transactionId = await Transactions.create(ctx, {
+      userId: user._id,
+      bankAccountId: cashAccountId,
+      merchant: args.merchant,
+      amount: args.amount,
+      date: args.date || new Date().toISOString().split("T")[0],
+      category: args.category || "Other",
+      description: args.description || "",
+      isManual: true,
+    });
+
+    // 3. Create the split
+    const splitId = await Splits.create(ctx, {
+      userId: user._id,
+      transactionId,
+      method: args.method,
+      status: "pending",
+      receiptImageId: args.receiptImageId,
+    });
+
+    // 4. Add participants
+    for (const participant of args.participants) {
+      await Splits.addParticipant(ctx, {
+        splitId,
+        userId: participant.userId,
+        amount: participant.amount,
+        percentage: participant.percentage,
+        status: "pending",
+      });
+    }
+
+    // 5. Add receipt items if provided
+    if (args.receiptItems) {
+      for (const item of args.receiptItems) {
+        await Splits.addReceiptItem(ctx, {
+          splitId,
+          ...item,
+        });
+      }
+    }
+
+    return { transactionId, splitId };
   },
 });

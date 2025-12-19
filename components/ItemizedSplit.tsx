@@ -30,9 +30,16 @@ export function ItemizedSplit() {
     setReceiptImage,
     calculateItemizedSplit,
     setCurrentStep,
+    isManualTransactionMode,
+    manualTransactionData,
   } = useSplit();
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Get transaction info from either source
+  const transactionInfo = isManualTransactionMode
+    ? manualTransactionData
+    : selectedTransaction;
 
   // Calculate totals
   const itemsTotal = receiptItems.reduce(
@@ -60,7 +67,7 @@ export function ItemizedSplit() {
     setCurrentStep("summary");
   };
 
-  if (!selectedTransaction) return null;
+  if (!transactionInfo) return null;
 
   return (
     <div className="flex flex-col h-full">

@@ -19,6 +19,14 @@ export interface Transaction {
   bankAccountId: Id<"bankAccounts">;
 }
 
+export interface ManualTransactionData {
+  merchant: string;
+  amount: number;
+  date?: string;
+  category?: string;
+  description?: string;
+}
+
 export interface Friend {
   _id: Id<"users">;
   name: string;
@@ -63,6 +71,10 @@ export interface SavedSplit {
   }>;
   status: "pending" | "settled";
   createdAt: number;
+  // Computed status based on participant statuses
+  overallStatus: "all_settled" | "settled_by_me" | "pending";
+  settledCount: number;
+  totalParticipants: number;
 }
 
 interface SplitState {
@@ -80,12 +92,18 @@ interface SplitState {
   receiptImage: string | null;
   // Sheet open state
   isSheetOpen: boolean;
-  // Current step in the flow
-  currentStep: "contacts" | "method" | "configure" | "summary";
+  // Current step in the flow (transaction-info is for manual transactions)
+  currentStep: "transaction-info" | "contacts" | "method" | "configure" | "summary";
   // Currently viewing split detail
   viewingSplit: SavedSplit | null;
   // Detail dialog open
   isDetailOpen: boolean;
+  // Manual transaction mode
+  isManualTransactionMode: boolean;
+  // Manual transaction data (merchant, amount, etc.)
+  manualTransactionData: ManualTransactionData | null;
+  // Include self in split
+  includeSelf: boolean;
 }
 
 interface SplitContextType extends SplitState {
@@ -93,6 +111,7 @@ interface SplitContextType extends SplitState {
   transactions: Transaction[];
   savedSplits: SavedSplit[];
   allFriends: Friend[];
+  currentUser: Friend | null;
   isLoading: boolean;
   // Actions
   openSplitSheet: (transaction: Transaction) => void;
@@ -116,9 +135,13 @@ interface SplitContextType extends SplitState {
   // Saved splits actions
   saveSplit: () => Promise<void>;
   deleteSplit: (id: Id<"splits">) => Promise<void>;
-  toggleSplitStatus: (id: Id<"splits">) => Promise<void>;
   viewSplitDetail: (split: SavedSplit) => void;
   closeSplitDetail: () => void;
+  // Manual transaction actions
+  openManualTransactionFlow: () => void;
+  setManualTransactionData: (data: ManualTransactionData) => void;
+  setIncludeSelf: (include: boolean) => void;
+  saveManualTransactionWithSplit: () => Promise<void>;
 }
 
 const initialState: SplitState = {
@@ -132,6 +155,9 @@ const initialState: SplitState = {
   currentStep: "contacts",
   viewingSplit: null,
   isDetailOpen: false,
+  isManualTransactionMode: false,
+  manualTransactionData: null,
+  includeSelf: false,
 };
 
 const SplitContext = createContext<SplitContextType | undefined>(undefined);
@@ -141,14 +167,15 @@ export function SplitProvider({ children }: { children: ReactNode }) {
 
   // Convex queries
   const transactionsData = useQuery(api.transactions.list);
-  const splitsData = useQuery(api.splits.list);
+  const splitsData = useQuery(api.splits.listWithStatus);
   const friendsData = useQuery(api.friendships.listFriends);
   const sentInvitationsData = useQuery(api.friendships.listSentRequests);
+  const currentUserData = useQuery(api.users.me);
 
   // Convex mutations
   const createSplitMutation = useMutation(api.splits.create);
   const deleteSplitMutation = useMutation(api.splits.remove);
-  const updateSplitStatusMutation = useMutation(api.splits.updateStatus);
+  const createManualWithSplitMutation = useMutation(api.transactions.createManualWithSplit);
 
   // Helper to calculate expired status
   const isExpired = (expiresAt: number | undefined) => {
@@ -201,15 +228,30 @@ export function SplitProvider({ children }: { children: ReactNode }) {
     return (statusOrder[a.status || "accepted"]) - (statusOrder[b.status || "accepted"]);
   });
 
-  // For saved splits, we need to fetch details - for now just show basic info
+  // Current user as a Friend object for self-inclusion in splits
+  const currentUser: Friend | null = currentUserData
+    ? {
+        _id: currentUserData._id,
+        name: currentUserData.name,
+        email: currentUserData.email,
+        initials: generateInitials(currentUserData.name),
+        color: "bg-blue-500",
+        status: "accepted",
+      }
+    : null;
+
+  // For saved splits, use the listWithStatus query which includes computed status
   const savedSplits: SavedSplit[] = (splitsData ?? []).map((s) => ({
     _id: s._id,
-    transaction: transactions.find((t) => t._id === s.transactionId) || null,
+    transaction: s.transaction || transactions.find((t) => t._id === s.transactionId) || null,
     method: s.method,
-    participants: [], // Would need to fetch from splitParticipants
-    receiptItems: [], // Would need to fetch from receiptItems
+    participants: [], // Populated when viewing details
+    receiptItems: [], // Populated when viewing details
     status: s.status,
     createdAt: s._creationTime,
+    overallStatus: s.overallStatus,
+    settledCount: s.settledCount,
+    totalParticipants: s.totalParticipants,
   }));
 
   const isLoading = transactionsData === undefined || splitsData === undefined || friendsData === undefined;
@@ -279,7 +321,9 @@ export function SplitProvider({ children }: { children: ReactNode }) {
 
   const updateParticipantPercentage = useCallback((friendId: string, percentage: number) => {
     setState((prev) => {
-      const total = prev.selectedTransaction?.amount || 0;
+      const total = prev.isManualTransactionMode
+        ? prev.manualTransactionData?.amount || 0
+        : prev.selectedTransaction?.amount || 0;
       return {
         ...prev,
         participants: prev.participants.map((p) =>
@@ -350,9 +394,13 @@ export function SplitProvider({ children }: { children: ReactNode }) {
 
   const calculateEqualSplit = useCallback(() => {
     setState((prev) => {
-      if (!prev.selectedTransaction || prev.selectedFriends.length === 0) return prev;
+      // Get total amount from either selected transaction or manual transaction data
+      const totalAmount = prev.isManualTransactionMode
+        ? prev.manualTransactionData?.amount || 0
+        : prev.selectedTransaction?.amount || 0;
 
-      const totalAmount = prev.selectedTransaction.amount;
+      if (totalAmount === 0 || prev.selectedFriends.length === 0) return prev;
+
       const numParticipants = prev.selectedFriends.length;
       const equalAmount = totalAmount / numParticipants;
       const equalPercentage = 100 / numParticipants;
@@ -371,7 +419,12 @@ export function SplitProvider({ children }: { children: ReactNode }) {
 
   const calculateItemizedSplit = useCallback(() => {
     setState((prev) => {
-      if (!prev.selectedTransaction || prev.selectedFriends.length === 0) return prev;
+      // Get total amount from either selected transaction or manual transaction data
+      const transactionTotal = prev.isManualTransactionMode
+        ? prev.manualTransactionData?.amount || 0
+        : prev.selectedTransaction?.amount || 0;
+
+      if (transactionTotal === 0 || prev.selectedFriends.length === 0) return prev;
 
       const totals: Record<string, number> = {};
       prev.selectedFriends.forEach((f) => {
@@ -389,8 +442,6 @@ export function SplitProvider({ children }: { children: ReactNode }) {
           });
         }
       });
-
-      const transactionTotal = prev.selectedTransaction.amount;
 
       return {
         ...prev,
@@ -441,28 +492,6 @@ export function SplitProvider({ children }: { children: ReactNode }) {
     }));
   }, [deleteSplitMutation]);
 
-  const toggleSplitStatus = useCallback(async (id: Id<"splits">) => {
-    const split = savedSplits.find((s) => s._id === id);
-    if (!split) return;
-    
-    const newStatus = split.status === "pending" ? "settled" : "pending";
-    await updateSplitStatusMutation({ splitId: id, status: newStatus });
-    
-    // Update viewingSplit in local state to reflect the change immediately
-    setState((prev) => {
-      if (prev.viewingSplit?._id === id) {
-        return {
-          ...prev,
-          viewingSplit: {
-            ...prev.viewingSplit,
-            status: newStatus,
-          },
-        };
-      }
-      return prev;
-    });
-  }, [savedSplits, updateSplitStatusMutation]);
-
   const viewSplitDetail = useCallback((split: SavedSplit) => {
     setState((prev) => ({
       ...prev,
@@ -483,11 +512,97 @@ export function SplitProvider({ children }: { children: ReactNode }) {
     setState(initialState);
   }, []);
 
+  // Manual transaction actions
+  const openManualTransactionFlow = useCallback(() => {
+    setState((prev) => ({
+      ...prev,
+      isSheetOpen: true,
+      isManualTransactionMode: true,
+      currentStep: "transaction-info",
+      manualTransactionData: null,
+      selectedTransaction: null,
+      selectedFriends: [],
+      participants: [],
+      includeSelf: false,
+    }));
+  }, []);
+
+  const setManualTransactionData = useCallback((data: ManualTransactionData) => {
+    setState((prev) => ({
+      ...prev,
+      manualTransactionData: data,
+    }));
+  }, []);
+
+  const setIncludeSelf = useCallback((include: boolean) => {
+    setState((prev) => {
+      // When toggling self, we need to update selectedFriends and participants
+      if (!currentUser) return prev;
+
+      let newFriends: Friend[];
+      if (include) {
+        // Add current user to friends if not already there
+        const alreadyIncluded = prev.selectedFriends.some((f) => f._id === currentUser._id);
+        newFriends = alreadyIncluded ? prev.selectedFriends : [currentUser, ...prev.selectedFriends];
+      } else {
+        // Remove current user from friends
+        newFriends = prev.selectedFriends.filter((f) => f._id !== currentUser._id);
+      }
+
+      return {
+        ...prev,
+        includeSelf: include,
+        selectedFriends: newFriends,
+        participants: newFriends.map((f) => ({
+          oderId: f._id,
+          amount: 0,
+          percentage: 0,
+          items: [],
+        })),
+      };
+    });
+  }, [currentUser]);
+
+  const saveManualTransactionWithSplit = useCallback(async () => {
+    if (!state.manualTransactionData || state.participants.length === 0) return;
+
+    const receiptItems = state.splitMethod === "itemized" ? state.receiptItems.map((item) => ({
+      name: item.name,
+      quantity: item.quantity,
+      price: item.price,
+      assignedToUserIds: item.assignedTo as Id<"users">[],
+    })) : undefined;
+
+    await createManualWithSplitMutation({
+      merchant: state.manualTransactionData.merchant,
+      amount: state.manualTransactionData.amount,
+      date: state.manualTransactionData.date,
+      category: state.manualTransactionData.category,
+      description: state.manualTransactionData.description,
+      method: state.splitMethod,
+      participants: state.participants.map((p) => ({
+        userId: p.oderId as Id<"users">,
+        amount: p.amount,
+        percentage: p.percentage,
+      })),
+      receiptItems,
+    });
+
+    setState(initialState);
+  }, [
+    state.manualTransactionData,
+    state.participants,
+    state.splitMethod,
+    state.receiptItems,
+    createManualWithSplitMutation,
+  ]);
+
   const value: SplitContextType = {
     ...state,
     transactions,
     savedSplits,
     allFriends,
+    currentUser,
     isLoading,
     openSplitSheet,
     closeSplitSheet,
@@ -509,9 +624,12 @@ export function SplitProvider({ children }: { children: ReactNode }) {
     resetSplit,
     saveSplit,
     deleteSplit,
-    toggleSplitStatus,
     viewSplitDetail,
     closeSplitDetail,
+    openManualTransactionFlow,
+    setManualTransactionData,
+    setIncludeSelf,
+    saveManualTransactionWithSplit,
   };
 
   return <SplitContext.Provider value={value}>{children}</SplitContext.Provider>;

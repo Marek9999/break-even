@@ -28,20 +28,43 @@ import {
   Clock,
   Trash2,
   Share2,
-  Copy,
   Check,
+  Loader2,
+  Users,
 } from "lucide-react";
 import { useState } from "react";
 import { generateInitials, generateAvatarColor } from "@/lib/data";
+import { useQuery, useMutation } from "convex/react";
+import { api } from "@/convex/_generated/api";
 
 export function SplitDetailDialog() {
-  const { viewingSplit, isDetailOpen, closeSplitDetail, toggleSplitStatus, deleteSplit } =
+  const { viewingSplit, isDetailOpen, closeSplitDetail, deleteSplit } =
     useSplit();
   const [copied, setCopied] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
 
+  // Mutation for settling my share
+  const settleMyShareMutation = useMutation(api.splits.settleMyShare);
+
+  // Fetch full split details including participants when dialog is open
+  const splitDetails = useQuery(
+    api.splits.getWithDetails,
+    viewingSplit ? { splitId: viewingSplit._id } : "skip"
+  );
+
   if (!viewingSplit || !viewingSplit.transaction) return null;
+
+  // Use fetched details for participants, fall back to empty array while loading
+  const participants = splitDetails?.participants ?? [];
+  const receiptItems = splitDetails?.receiptItems ?? [];
+  const isLoadingDetails = splitDetails === undefined;
+  
+  // Per-user settlement status
+  const overallStatus = splitDetails?.overallStatus ?? "pending";
+  const currentUserSettled = splitDetails?.currentUserParticipant?.status === "paid";
+  const settledCount = splitDetails?.settledCount ?? 0;
+  const totalParticipants = splitDetails?.totalParticipants ?? 0;
 
   const config = categoryConfig[viewingSplit.transaction.category as keyof typeof categoryConfig] || {
     label: viewingSplit.transaction.category,
@@ -75,27 +98,54 @@ export function SplitDetailDialog() {
     }
   };
 
-  const handleToggleStatus = async () => {
+  const handleSettleMyShare = async () => {
     setIsUpdating(true);
     try {
-      await toggleSplitStatus(viewingSplit._id);
+      await settleMyShareMutation({ splitId: viewingSplit._id });
     } finally {
       setIsUpdating(false);
     }
   };
 
-  const isPending = viewingSplit.status === "pending";
+  // Status display helpers
+  const getStatusBadge = () => {
+    if (overallStatus === "all_settled") {
+      return (
+        <Badge className="bg-emerald-500 text-white">
+          All Settled
+        </Badge>
+      );
+    } else if (overallStatus === "settled_by_me") {
+      return (
+        <Badge variant="outline" className="border-blue-300 text-blue-700 bg-blue-50">
+          Settled by me
+        </Badge>
+      );
+    } else {
+      return (
+        <Badge variant="outline" className="border-amber-300 text-amber-700 bg-amber-50">
+          Pending
+        </Badge>
+      );
+    }
+  };
+
+  const getHeaderIcon = () => {
+    if (overallStatus === "all_settled") {
+      return <CheckCircle2 className="h-5 w-5 text-emerald-500" />;
+    } else if (overallStatus === "settled_by_me") {
+      return <CheckCircle2 className="h-5 w-5 text-blue-500" />;
+    } else {
+      return <Clock className="h-5 w-5 text-amber-500" />;
+    }
+  };
 
   return (
     <Dialog open={isDetailOpen} onOpenChange={(open) => !open && closeSplitDetail()}>
       <DialogContent className="max-w-lg max-h-[90vh]">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            {isPending ? (
-              <Clock className="h-5 w-5 text-amber-500" />
-            ) : (
-              <CheckCircle2 className="h-5 w-5 text-emerald-500" />
-            )}
+            {getHeaderIcon()}
             Split Details
           </DialogTitle>
         </DialogHeader>
@@ -131,16 +181,14 @@ export function SplitDetailDialog() {
             </div>
             <div className="mt-3">
               <p className="text-sm text-stone-500">Status</p>
-              <Badge
-                variant={isPending ? "outline" : "default"}
-                className={
-                  isPending
-                    ? "border-amber-300 text-amber-700 bg-amber-50"
-                    : "bg-emerald-500"
-                }
-              >
-                {isPending ? "Pending" : "Settled"}
-              </Badge>
+              <div className="flex items-center gap-2">
+                {getStatusBadge()}
+                {totalParticipants > 0 && (
+                  <span className="text-xs text-stone-400">
+                    ({settledCount}/{totalParticipants} settled)
+                  </span>
+                )}
+              </div>
             </div>
             <p className="text-xs text-stone-400 mt-3">
               Created {new Date(viewingSplit.createdAt).toLocaleString()}
@@ -148,22 +196,27 @@ export function SplitDetailDialog() {
           </Card>
 
           {/* Participants */}
-          <h4 className="font-medium text-stone-900 mb-3">
-            Participants ({viewingSplit.participants.length})
+          <h4 className="font-medium text-stone-900 mb-3 flex items-center gap-2">
+            <Users className="h-4 w-4" />
+            Participants ({participants.length})
           </h4>
           <div className="space-y-2 mb-4">
-            {viewingSplit.participants.length === 0 ? (
+            {isLoadingDetails ? (
+              <div className="flex items-center justify-center py-4">
+                <Loader2 className="h-6 w-6 animate-spin text-stone-400" />
+              </div>
+            ) : participants.length === 0 ? (
               <p className="text-sm text-stone-500 text-center py-4">
-                Participant details will be loaded here
+                No participants found
               </p>
             ) : (
-              viewingSplit.participants.map((participant) => {
+              participants.map((participant) => {
                 const initials = participant.user ? generateInitials(participant.user.name) : "?";
                 const color = participant.user ? generateAvatarColor() : "bg-stone-400";
                 
                 return (
                   <div
-                    key={participant.oderId}
+                    key={participant.userId}
                     className="flex items-center justify-between p-3 rounded-lg bg-white border border-stone-200"
                   >
                     <div className="flex items-center gap-3">
@@ -177,20 +230,21 @@ export function SplitDetailDialog() {
                           {participant.user?.name || "Unknown"}
                         </p>
                         <p className="text-sm text-stone-500">
-                          {participant.percentage.toFixed(1)}%
+                          {(participant.percentage ?? 0).toFixed(1)}%
                         </p>
                       </div>
                     </div>
-                    <div className="text-right">
-                      <p className="font-semibold text-stone-900">
-                        {formatCurrency(participant.amount)}
-                      </p>
-                      <Badge 
-                        variant="outline" 
-                        className={participant.status === "paid" ? "text-emerald-600 border-emerald-300" : "text-amber-600 border-amber-300"}
-                      >
-                        {participant.status}
-                      </Badge>
+                    <div className="text-right flex items-center gap-2">
+                      <div>
+                        <p className="font-semibold text-stone-900">
+                          {formatCurrency(participant.amount)}
+                        </p>
+                      </div>
+                      {participant.status === "paid" ? (
+                        <CheckCircle2 className="h-5 w-5 text-emerald-500" />
+                      ) : (
+                        <Clock className="h-5 w-5 text-amber-400" />
+                      )}
                     </div>
                   </div>
                 );
@@ -199,47 +253,47 @@ export function SplitDetailDialog() {
           </div>
 
           {/* Items for itemized splits */}
-          {viewingSplit.method === "itemized" && viewingSplit.receiptItems.length > 0 && (
+          {viewingSplit.method === "itemized" && receiptItems.length > 0 && (
             <>
-              <h4 className="font-medium text-stone-900 mb-3 flex items-center gap-2">
-                <Receipt className="h-4 w-4" />
-                Items ({viewingSplit.receiptItems.length})
-              </h4>
-              <Card className="mb-4 overflow-hidden">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Item</TableHead>
-                      <TableHead className="text-right">Price</TableHead>
-                      <TableHead>Assigned</TableHead>
+            <h4 className="font-medium text-stone-900 mb-3 flex items-center gap-2">
+              <Receipt className="h-4 w-4" />
+              Items ({receiptItems.length})
+            </h4>
+            <Card className="mb-4 overflow-hidden">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Item</TableHead>
+                    <TableHead className="text-right">Price</TableHead>
+                    <TableHead>Assigned</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {receiptItems.map((item) => (
+                    <TableRow key={item._id}>
+                      <TableCell>
+                        <div>
+                          <p className="font-medium">{item.name}</p>
+                          {item.quantity > 1 && (
+                            <p className="text-xs text-stone-500">
+                              Qty: {item.quantity}
+                            </p>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {formatCurrency(item.quantity * item.price)}
+                      </TableCell>
+                      <TableCell>
+                        <span className="text-sm text-stone-500">
+                          {item.assignedToUserIds.length} people
+                        </span>
+                      </TableCell>
                     </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {viewingSplit.receiptItems.map((item) => (
-                      <TableRow key={item._id}>
-                        <TableCell>
-                          <div>
-                            <p className="font-medium">{item.name}</p>
-                            {item.quantity > 1 && (
-                              <p className="text-xs text-stone-500">
-                                Qty: {item.quantity}
-                              </p>
-                            )}
-                          </div>
-                        </TableCell>
-                        <TableCell className="text-right">
-                          {formatCurrency(item.quantity * item.price)}
-                        </TableCell>
-                        <TableCell>
-                          <span className="text-sm text-stone-500">
-                            {item.assignedToUserIds.length} people
-                          </span>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </Card>
+                  ))}
+                </TableBody>
+              </Table>
+            </Card>
             </>
           )}
         </ScrollArea>
@@ -247,24 +301,26 @@ export function SplitDetailDialog() {
         {/* Actions */}
         <div className="flex flex-col gap-2 pt-2 border-t">
           <div className="flex gap-2">
-            <Button
-              variant={isPending ? "default" : "outline"}
-              className="flex-1"
-              onClick={handleToggleStatus}
-              disabled={isUpdating}
-            >
-              {isPending ? (
-                <>
-                  <CheckCircle2 className="mr-2 h-4 w-4" />
-                  {isUpdating ? "Updating..." : "Mark as Settled"}
-                </>
-              ) : (
-                <>
-                  <Clock className="mr-2 h-4 w-4" />
-                  {isUpdating ? "Updating..." : "Mark as Pending"}
-                </>
-              )}
-            </Button>
+            {splitDetails?.currentUserParticipant && (
+              <Button
+                variant={currentUserSettled ? "outline" : "default"}
+                className="flex-1"
+                onClick={handleSettleMyShare}
+                disabled={isUpdating || isLoadingDetails}
+              >
+                {currentUserSettled ? (
+                  <>
+                    <Clock className="mr-2 h-4 w-4" />
+                    {isUpdating ? "Updating..." : "Unsettle My Share"}
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle2 className="mr-2 h-4 w-4" />
+                    {isUpdating ? "Updating..." : "Settle My Share"}
+                  </>
+                )}
+              </Button>
+            )}
             <Button variant="outline" onClick={handleCopyLink}>
               {copied ? (
                 <Check className="h-4 w-4" />

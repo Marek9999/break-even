@@ -60,6 +60,8 @@ export default defineSchema({
     description: v.string(),
     // Plaid integration field for deduplication
     plaidTransactionId: v.optional(v.string()),
+    // Flag to identify manually added cash transactions
+    isManual: v.optional(v.boolean()),
   })
     .index("by_userId", ["userId"])
     .index("by_bankAccountId", ["bankAccountId"])

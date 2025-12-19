@@ -15,6 +15,8 @@ export function CustomSplit() {
     participants,
     updateParticipantAmount,
     setCurrentStep,
+    isManualTransactionMode,
+    manualTransactionData,
   } = useSplit();
 
   const totalAssigned = useMemo(
@@ -22,9 +24,14 @@ export function CustomSplit() {
     [participants]
   );
 
-  if (!selectedTransaction) return null;
+  // Get transaction info from either source
+  const transactionInfo = isManualTransactionMode
+    ? manualTransactionData
+    : selectedTransaction;
 
-  const totalAmount = selectedTransaction.amount;
+  if (!transactionInfo) return null;
+
+  const totalAmount = transactionInfo.amount;
   const difference = totalAmount - totalAssigned;
   const isValid = Math.abs(difference) < 0.01;
 

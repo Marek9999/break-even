@@ -28,15 +28,40 @@ export function SplitSummary() {
     receiptItems,
     setCurrentStep,
     saveSplit,
+    isManualTransactionMode,
+    manualTransactionData,
+    saveManualTransactionWithSplit,
+    currentUser,
+    includeSelf,
   } = useSplit();
 
   const [showSharePreview, setShowSharePreview] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
-  if (!selectedTransaction) return null;
+  // Determine if we have valid data to display
+  const hasValidData = isManualTransactionMode 
+    ? manualTransactionData !== null 
+    : selectedTransaction !== null;
 
-  const config = categoryConfig[selectedTransaction.category as keyof typeof categoryConfig] || {
-    label: selectedTransaction.category,
+  if (!hasValidData) return null;
+
+  // Get transaction info from either source
+  const transactionInfo = isManualTransactionMode
+    ? {
+        merchant: manualTransactionData!.merchant,
+        amount: manualTransactionData!.amount,
+        date: manualTransactionData!.date || new Date().toISOString().split("T")[0],
+        category: manualTransactionData!.category || "Other",
+      }
+    : {
+        merchant: selectedTransaction!.merchant,
+        amount: selectedTransaction!.amount,
+        date: selectedTransaction!.date,
+        category: selectedTransaction!.category,
+      };
+
+  const config = categoryConfig[transactionInfo.category as keyof typeof categoryConfig] || {
+    label: transactionInfo.category,
     color: "text-stone-600",
     bgColor: "bg-stone-100",
   };
@@ -52,11 +77,19 @@ export function SplitSummary() {
   const handleSave = async () => {
     setIsSaving(true);
     try {
-      await saveSplit();
+      if (isManualTransactionMode) {
+        await saveManualTransactionWithSplit();
+      } else {
+        await saveSplit();
+      }
     } finally {
       setIsSaving(false);
     }
   };
+
+  // Helper to check if a participant is the current user
+  const isCurrentUser = (friendId: string) => 
+    currentUser && currentUser._id === friendId;
 
   // Helper to find friend by ID
   const getFriendById = (friendId: string) => 
@@ -86,21 +119,28 @@ export function SplitSummary() {
           <div className="flex items-center justify-between mb-2">
             <div>
               <p className="font-semibold text-stone-900">
-                {selectedTransaction.merchant}
+                {transactionInfo.merchant}
               </p>
               <p className="text-sm text-stone-500">
-                {formatDate(selectedTransaction.date)}
+                {formatDate(transactionInfo.date)}
               </p>
             </div>
-            <Badge className={`${config.bgColor} ${config.color} border-0`}>
-              {config.label}
-            </Badge>
+            <div className="flex items-center gap-2">
+              {isManualTransactionMode && (
+                <Badge className="bg-emerald-100 text-emerald-700 border-0">
+                  Cash
+                </Badge>
+              )}
+              <Badge className={`${config.bgColor} ${config.color} border-0`}>
+                {config.label}
+              </Badge>
+            </div>
           </div>
           <Separator className="my-3" />
           <div className="flex items-center justify-between">
             <span className="text-stone-600">Total Amount</span>
             <span className="font-bold text-lg">
-              {formatCurrency(selectedTransaction.amount)}
+              {formatCurrency(transactionInfo.amount)}
             </span>
           </div>
           <div className="flex items-center justify-between mt-1">
@@ -117,11 +157,16 @@ export function SplitSummary() {
         <div className="space-y-2 mb-4">
           {selectedFriends.map((friend, index) => {
             const participant = participants[index];
+            const isSelf = isCurrentUser(friend._id);
             
             return (
               <div
                 key={friend._id}
-                className="flex items-center justify-between p-3 rounded-lg bg-white border border-stone-200"
+                className={`flex items-center justify-between p-3 rounded-lg border ${
+                  isSelf 
+                    ? "bg-blue-50 border-blue-200" 
+                    : "bg-white border-stone-200"
+                }`}
               >
                 <div className="flex items-center gap-3">
                   <Avatar className="h-10 w-10">
@@ -130,7 +175,12 @@ export function SplitSummary() {
                     </AvatarFallback>
                   </Avatar>
                   <div>
-                    <p className="font-medium text-stone-900">{friend.name}</p>
+                    <p className="font-medium text-stone-900">
+                      {friend.name}
+                      {isSelf && (
+                        <span className="ml-2 text-xs text-blue-600 font-normal">(You)</span>
+                      )}
+                    </p>
                     <p className="text-sm text-stone-500">
                       {participant?.percentage?.toFixed(1) || 0}% of total
                     </p>

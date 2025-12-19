@@ -14,7 +14,7 @@ import { SplitMethodTabs } from "./SplitMethodTabs";
 import { SplitSummary } from "./SplitSummary";
 
 export function SplitSheet() {
-  const { isSheetOpen, closeSplitSheet, selectedTransaction, currentStep } =
+  const { isSheetOpen, closeSplitSheet, selectedTransaction, currentStep, isManualTransactionMode } =
     useSplit();
 
   const renderStep = () => {
@@ -30,6 +30,10 @@ export function SplitSheet() {
         return <ContactSelector />;
     }
   };
+
+  // Don't render this dialog when in manual transaction mode
+  // (AddManualTransactionDialog handles that flow)
+  if (isManualTransactionMode) return null;
 
   return (
     <Dialog open={isSheetOpen} onOpenChange={(open) => !open && closeSplitSheet()}>

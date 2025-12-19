@@ -11,9 +11,21 @@ import { ItemizedSplit } from "./ItemizedSplit";
 import { ArrowLeft, Equal, Percent, DollarSign, Receipt } from "lucide-react";
 
 export function SplitMethodTabs() {
-  const { selectedTransaction, splitMethod, setSplitMethod, setCurrentStep } = useSplit();
+  const { 
+    selectedTransaction, 
+    splitMethod, 
+    setSplitMethod, 
+    setCurrentStep,
+    isManualTransactionMode,
+    manualTransactionData,
+  } = useSplit();
 
-  if (!selectedTransaction) return null;
+  // Get transaction info from either source
+  const transactionInfo = isManualTransactionMode
+    ? manualTransactionData
+    : selectedTransaction;
+
+  if (!transactionInfo) return null;
 
   return (
     <div className="flex flex-col pb-4">
@@ -29,10 +41,10 @@ export function SplitMethodTabs() {
         </Button>
         <div>
           <h3 className="font-semibold text-stone-900">
-            {selectedTransaction.merchant}
+            {transactionInfo.merchant}
           </h3>
           <p className="text-sm text-stone-500">
-            {formatCurrency(selectedTransaction.amount)}
+            {formatCurrency(transactionInfo.amount)}
           </p>
         </div>
       </div>

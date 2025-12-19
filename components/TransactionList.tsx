@@ -3,13 +3,14 @@
 import { TransactionCard } from "./TransactionCard";
 import { useSplit, Transaction } from "@/lib/split-context";
 import { useSettings } from "@/lib/settings-context";
-import { Search, Loader2 } from "lucide-react";
+import { Search, Loader2, Plus } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import { useState, useMemo } from "react";
 import { BankFilterDropdown } from "./BankFilterDropdown";
 
 export function TransactionList() {
-  const { openSplitSheet, transactions: allTransactions, isLoading } = useSplit();
+  const { openSplitSheet, openManualTransactionFlow, transactions: allTransactions, isLoading } = useSplit();
   const { selectedBankFilter } = useSettings();
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -64,6 +65,15 @@ export function TransactionList() {
             className="pl-10 bg-white border-stone-200"
           />
         </div>
+        <Button
+          size="icon"
+          variant="outline"
+          onClick={openManualTransactionFlow}
+          title="Add cash transaction"
+          className="shrink-0"
+        >
+          <Plus className="h-4 w-4" />
+        </Button>
       </div>
 
       {/* Transaction List */}

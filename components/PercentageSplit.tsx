@@ -15,6 +15,8 @@ export function PercentageSplit() {
     participants,
     updateParticipantPercentage,
     setCurrentStep,
+    isManualTransactionMode,
+    manualTransactionData,
   } = useSplit();
 
   const totalPercentage = useMemo(
@@ -24,9 +26,14 @@ export function PercentageSplit() {
 
   const isValid = Math.abs(totalPercentage - 100) < 0.01;
 
-  if (!selectedTransaction) return null;
+  // Get transaction info from either source
+  const transactionInfo = isManualTransactionMode
+    ? manualTransactionData
+    : selectedTransaction;
 
-  const totalAmount = selectedTransaction.amount;
+  if (!transactionInfo) return null;
+
+  const totalAmount = transactionInfo.amount;
 
   return (
     <div className="flex flex-col h-full">

@@ -15,15 +15,22 @@ export function EqualSplit() {
     participants,
     calculateEqualSplit,
     setCurrentStep,
+    isManualTransactionMode,
+    manualTransactionData,
   } = useSplit();
 
   useEffect(() => {
     calculateEqualSplit();
   }, [calculateEqualSplit]);
 
-  if (!selectedTransaction) return null;
+  // Get transaction info from either source
+  const transactionInfo = isManualTransactionMode
+    ? manualTransactionData
+    : selectedTransaction;
 
-  const totalAmount = selectedTransaction.amount;
+  if (!transactionInfo) return null;
+
+  const totalAmount = transactionInfo.amount;
   const perPersonAmount = selectedFriends.length > 0 ? totalAmount / selectedFriends.length : 0;
 
   return (

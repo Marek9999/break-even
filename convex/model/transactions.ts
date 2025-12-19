@@ -65,6 +65,7 @@ export async function create(
     category: string;
     description: string;
     plaidTransactionId?: string;
+    isManual?: boolean;
   }
 ): Promise<Id<"transactions">> {
   return await ctx.db.insert("transactions", data);

@@ -173,6 +173,21 @@ export async function getPendingPayments(
 }
 
 /**
+ * Find a user's participation record for a specific split.
+ */
+export async function findUserParticipation(
+  ctx: QueryCtx | MutationCtx,
+  splitId: Id<"splits">,
+  userId: Id<"users">
+): Promise<Doc<"splitParticipants"> | null> {
+  const participants = await ctx.db
+    .query("splitParticipants")
+    .withIndex("by_splitId", (q) => q.eq("splitId", splitId))
+    .collect();
+  return participants.find((p) => p.userId === userId) ?? null;
+}
+
+/**
  * Add a participant to a split.
  */
 export async function addParticipant(

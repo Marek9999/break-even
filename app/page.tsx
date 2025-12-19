@@ -2,6 +2,7 @@
 
 import { TransactionList } from "@/components/TransactionList";
 import { SplitSheet } from "@/components/SplitSheet";
+import { AddManualTransactionDialog } from "@/components/AddManualTransactionDialog";
 import { SplitHistory } from "@/components/SplitHistory";
 import { SplitDetailDialog } from "@/components/SplitDetailDialog";
 import { SettingsSheet } from "@/components/SettingsSheet";
@@ -153,8 +154,11 @@ export default function Home() {
         </Tabs>
       </div>
 
-      {/* Split Sheet */}
+      {/* Split Sheet (for existing transactions) */}
       <SplitSheet />
+
+      {/* Add Manual Transaction Dialog (for cash transactions) */}
+      <AddManualTransactionDialog />
 
       {/* Split Detail Dialog */}
       <SplitDetailDialog />
