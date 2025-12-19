@@ -98,3 +98,44 @@ export const remove = mutation({
     await BankAccounts.remove(ctx, bankAccountId);
   },
 });
+
+/**
+ * Create a bank account from Plaid data.
+ * Called after successful Plaid Link flow.
+ */
+export const createFromPlaid = mutation({
+  args: {
+    bankName: v.string(),
+    accountNumberLast4: v.string(),
+    accountType: v.union(
+      v.literal("checking"),
+      v.literal("savings"),
+      v.literal("credit")
+    ),
+    balance: v.number(),
+    color: v.string(),
+    plaidItemId: v.string(),
+    plaidAccessToken: v.string(),
+    plaidAccountId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const user = await Auth.requireUser(ctx);
+    return await BankAccounts.createFromPlaid(ctx, {
+      userId: user._id,
+      ...args,
+    });
+  },
+});
+
+/**
+ * Get a bank account by Plaid Item ID.
+ */
+export const getByPlaidItemId = query({
+  args: {
+    plaidItemId: v.string(),
+  },
+  handler: async (ctx, { plaidItemId }) => {
+    await Auth.requireUser(ctx);
+    return await BankAccounts.getByPlaidItemId(ctx, plaidItemId);
+  },
+});

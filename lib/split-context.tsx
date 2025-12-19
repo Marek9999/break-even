@@ -25,6 +25,7 @@ export interface Friend {
   email: string;
   initials: string;
   color: string;
+  status?: "accepted" | "pending" | "expired";
 }
 
 export interface ReceiptItem {
@@ -142,11 +143,18 @@ export function SplitProvider({ children }: { children: ReactNode }) {
   const transactionsData = useQuery(api.transactions.list);
   const splitsData = useQuery(api.splits.list);
   const friendsData = useQuery(api.friendships.listFriends);
+  const sentInvitationsData = useQuery(api.friendships.listSentRequests);
 
   // Convex mutations
   const createSplitMutation = useMutation(api.splits.create);
   const deleteSplitMutation = useMutation(api.splits.remove);
   const updateSplitStatusMutation = useMutation(api.splits.updateStatus);
+
+  // Helper to calculate expired status
+  const isExpired = (expiresAt: number | undefined) => {
+    if (!expiresAt) return false;
+    return expiresAt < Date.now();
+  };
 
   // Transform Convex data
   const transactions: Transaction[] = (transactionsData ?? []).map((t) => ({
@@ -159,7 +167,8 @@ export function SplitProvider({ children }: { children: ReactNode }) {
     bankAccountId: t.bankAccountId,
   }));
 
-  const allFriends: Friend[] = (friendsData ?? []).map((f) => {
+  // Accepted friends
+  const acceptedFriends: Friend[] = (friendsData ?? []).map((f) => {
     const friend = f.friend;
     if (!friend) return null;
     return {
@@ -168,8 +177,29 @@ export function SplitProvider({ children }: { children: ReactNode }) {
       email: friend.email,
       initials: generateInitials(friend.name),
       color: generateAvatarColor(),
+      status: "accepted" as const,
     };
   }).filter((f): f is Friend => f !== null);
+
+  // Pending/expired contacts (people we invited)
+  const pendingContacts: Friend[] = (sentInvitationsData ?? []).map((inv) => {
+    const addressee = inv.addressee;
+    if (!addressee) return null;
+    return {
+      _id: addressee._id,
+      name: addressee.name,
+      email: addressee.email,
+      initials: generateInitials(addressee.name),
+      color: generateAvatarColor(),
+      status: isExpired(inv.friendship.expiresAt) ? "expired" as const : "pending" as const,
+    };
+  }).filter((f): f is Friend => f !== null);
+
+  // Merge all contacts - accepted first, then pending, then expired
+  const allFriends: Friend[] = [...acceptedFriends, ...pendingContacts].sort((a, b) => {
+    const statusOrder = { accepted: 0, pending: 1, expired: 2 };
+    return (statusOrder[a.status || "accepted"]) - (statusOrder[b.status || "accepted"]);
+  });
 
   // For saved splits, we need to fetch details - for now just show basic info
   const savedSplits: SavedSplit[] = (splitsData ?? []).map((s) => ({
@@ -417,6 +447,20 @@ export function SplitProvider({ children }: { children: ReactNode }) {
     
     const newStatus = split.status === "pending" ? "settled" : "pending";
     await updateSplitStatusMutation({ splitId: id, status: newStatus });
+    
+    // Update viewingSplit in local state to reflect the change immediately
+    setState((prev) => {
+      if (prev.viewingSplit?._id === id) {
+        return {
+          ...prev,
+          viewingSplit: {
+            ...prev.viewingSplit,
+            status: newStatus,
+          },
+        };
+      }
+      return prev;
+    });
   }, [savedSplits, updateSplitStatusMutation]);
 
   const viewSplitDetail = useCallback((split: SavedSplit) => {

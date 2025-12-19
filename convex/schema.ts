@@ -9,7 +9,9 @@ export default defineSchema({
     email: v.string(),
     phone: v.optional(v.string()),
     avatarUrl: v.optional(v.string()),
-  }).index("by_clerkId", ["clerkId"]),
+  })
+    .index("by_clerkId", ["clerkId"])
+    .index("by_email", ["email"]),
 
   // Friendships - bidirectional friend relationships
   friendships: defineTable({
@@ -20,12 +22,14 @@ export default defineSchema({
       v.literal("accepted"),
       v.literal("rejected")
     ),
+    // Expiration timestamp for pending invitations (7 days from creation)
+    expiresAt: v.optional(v.number()),
   })
     .index("by_requester", ["requesterId"])
     .index("by_addressee", ["addresseeId"])
     .index("by_requester_status", ["requesterId", "status"]),
 
-  // Bank accounts - user's connected accounts (Plaid-ready)
+  // Bank accounts - user's connected accounts (Plaid-integrated)
   bankAccounts: defineTable({
     userId: v.id("users"),
     bankName: v.string(),
@@ -37,8 +41,13 @@ export default defineSchema({
     ),
     balance: v.number(),
     color: v.string(),
+    // Plaid integration fields
     plaidItemId: v.optional(v.string()),
-  }).index("by_userId", ["userId"]),
+    plaidAccessToken: v.optional(v.string()),
+    plaidAccountId: v.optional(v.string()),
+  })
+    .index("by_userId", ["userId"])
+    .index("by_plaidItemId", ["plaidItemId"]),
 
   // Transactions - user's transactions from bank accounts
   transactions: defineTable({
@@ -49,10 +58,13 @@ export default defineSchema({
     date: v.string(),
     category: v.string(),
     description: v.string(),
+    // Plaid integration field for deduplication
+    plaidTransactionId: v.optional(v.string()),
   })
     .index("by_userId", ["userId"])
     .index("by_bankAccountId", ["bankAccountId"])
-    .index("by_userId_date", ["userId", "date"]),
+    .index("by_userId_date", ["userId", "date"])
+    .index("by_plaidTransactionId", ["plaidTransactionId"]),
 
   // Splits - saved bill splits
   splits: defineTable({

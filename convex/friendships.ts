@@ -5,7 +5,7 @@ import * as Friendships from "./model/friendships";
 import * as Users from "./model/users";
 
 /**
- * Send a friend request to another user.
+ * Send a friend request to another user by ID.
  */
 export const sendRequest = mutation({
   args: {
@@ -26,6 +26,44 @@ export const sendRequest = mutation({
     }
 
     return await Friendships.sendRequest(ctx, user._id, addresseeId);
+  },
+});
+
+/**
+ * Send a friend request by email.
+ * If the user doesn't exist, create a placeholder user.
+ */
+export const sendRequestByEmail = mutation({
+  args: {
+    email: v.string(),
+  },
+  handler: async (ctx, { email }) => {
+    const user = await Auth.requireUser(ctx);
+    const normalizedEmail = email.toLowerCase().trim();
+
+    // Can't send request to yourself
+    if (user.email.toLowerCase() === normalizedEmail) {
+      throw new Error("You cannot send a friend request to yourself");
+    }
+
+    // Check if user exists by email
+    let addressee = await Users.getByEmail(ctx, normalizedEmail);
+
+    // If user doesn't exist, create a placeholder user
+    if (!addressee) {
+      const placeholderId = await ctx.db.insert("users", {
+        clerkId: `invited-${normalizedEmail}`,
+        name: normalizedEmail.split("@")[0],
+        email: normalizedEmail,
+      });
+      addressee = await ctx.db.get(placeholderId);
+    }
+
+    if (!addressee) {
+      throw new Error("Failed to create invitation");
+    }
+
+    return await Friendships.sendRequest(ctx, user._id, addressee._id);
   },
 });
 
@@ -65,6 +103,67 @@ export const remove = mutation({
   handler: async (ctx, { friendshipId }) => {
     const user = await Auth.requireUser(ctx);
     await Friendships.removeFriendship(ctx, friendshipId, user._id);
+  },
+});
+
+/**
+ * Cancel a sent friend request.
+ */
+export const cancelRequest = mutation({
+  args: {
+    friendshipId: v.id("friendships"),
+  },
+  handler: async (ctx, { friendshipId }) => {
+    const user = await Auth.requireUser(ctx);
+    const friendship = await ctx.db.get(friendshipId);
+    
+    if (!friendship) {
+      throw new Error("Friend request not found");
+    }
+    
+    // Only the requester can cancel
+    if (friendship.requesterId !== user._id) {
+      throw new Error("Only the sender can cancel a friend request");
+    }
+    
+    if (friendship.status !== "pending") {
+      throw new Error("Friend request is not pending");
+    }
+    
+    await ctx.db.delete(friendshipId);
+  },
+});
+
+/**
+ * Reinvite a friend (reset expiration for pending/expired invitation).
+ */
+export const reinvite = mutation({
+  args: {
+    friendshipId: v.id("friendships"),
+  },
+  handler: async (ctx, { friendshipId }) => {
+    const user = await Auth.requireUser(ctx);
+    const friendship = await ctx.db.get(friendshipId);
+    
+    if (!friendship) {
+      throw new Error("Friend request not found");
+    }
+    
+    // Only the requester can reinvite
+    if (friendship.requesterId !== user._id) {
+      throw new Error("Only the sender can reinvite");
+    }
+    
+    // Can only reinvite pending invitations
+    if (friendship.status !== "pending") {
+      throw new Error("Can only reinvite pending invitations");
+    }
+    
+    // Reset expiration to 7 days from now
+    const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+    await ctx.db.patch(friendshipId, {
+      expiresAt: Date.now() + SEVEN_DAYS_MS,
+    });
   },
 });
 

@@ -26,10 +26,12 @@ interface BankAccount {
   accountType: "checking" | "savings" | "credit";
   balance: number;
   color: string;
+  plaidAccessToken?: string;
 }
 
 interface Friend {
   _id: Id<"users">;
+  friendshipId: Id<"friendships">;
   name: string;
   email: string;
   phone?: string;
@@ -37,6 +39,24 @@ interface Friend {
   // UI helpers
   initials: string;
   color: string;
+  // Status for pending/expired contacts
+  status: "accepted" | "pending" | "expired";
+  expiresAt?: number;
+  daysRemaining?: number;
+}
+
+interface Invitation {
+  friendshipId: Id<"friendships">;
+  user: {
+    _id: Id<"users">;
+    name: string;
+    email: string;
+    initials: string;
+    color: string;
+  };
+  expiresAt: number;
+  daysRemaining: number;
+  isExpired: boolean;
 }
 
 interface SettingsState {
@@ -56,6 +76,8 @@ interface SettingsContextType extends SettingsState {
   // Data from Convex
   bankAccounts: BankAccount[];
   friends: Friend[];
+  receivedInvitations: Invitation[];
+  sentInvitations: Invitation[];
   isLoading: boolean;
   // Settings sheet
   openSettings: () => void;
@@ -63,8 +85,11 @@ interface SettingsContextType extends SettingsState {
   // User actions
   updateUser: (user: Partial<User>) => void;
   // Friend actions (using friendship system)
-  sendFriendRequest: (addresseeId: Id<"users">) => Promise<void>;
+  sendFriendRequestByEmail: (email: string) => Promise<void>;
   acceptFriendRequest: (friendshipId: Id<"friendships">) => Promise<void>;
+  rejectFriendRequest: (friendshipId: Id<"friendships">) => Promise<void>;
+  cancelSentRequest: (friendshipId: Id<"friendships">) => Promise<void>;
+  reinviteFriend: (friendshipId: Id<"friendships">) => Promise<void>;
   removeFriend: (friendshipId: Id<"friendships">) => Promise<void>;
   openFriendForm: (friend?: Friend) => void;
   closeFriendForm: () => void;
@@ -102,11 +127,16 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   const convexUser = useQuery(api.users.me);
   const bankAccountsData = useQuery(api.bankAccounts.list);
   const friendsData = useQuery(api.friendships.listFriends);
+  const receivedInvitationsData = useQuery(api.friendships.listPendingRequests);
+  const sentInvitationsData = useQuery(api.friendships.listSentRequests);
 
   // Convex mutations
   const getOrCreateUser = useMutation(api.users.getOrCreate);
-  const sendFriendRequestMutation = useMutation(api.friendships.sendRequest);
+  const sendFriendRequestByEmailMutation = useMutation(api.friendships.sendRequestByEmail);
   const acceptFriendRequestMutation = useMutation(api.friendships.acceptRequest);
+  const rejectFriendRequestMutation = useMutation(api.friendships.rejectRequest);
+  const cancelRequestMutation = useMutation(api.friendships.cancelRequest);
+  const reinviteMutation = useMutation(api.friendships.reinvite);
   const removeFriendMutation = useMutation(api.friendships.remove);
   const createBankAccount = useMutation(api.bankAccounts.create);
   const updateBankAccountMutation = useMutation(api.bankAccounts.update);
@@ -152,19 +182,104 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   // Transform Convex data to UI format
   const bankAccounts: BankAccount[] = bankAccountsData ?? [];
   
-  const friends: Friend[] = (friendsData ?? []).map((f) => {
+  // Helper to calculate days remaining and expired status
+  const calculateExpiry = (expiresAt: number | undefined) => {
+    if (!expiresAt) return { daysRemaining: 7, isExpired: false };
+    const now = Date.now();
+    const msRemaining = expiresAt - now;
+    const daysRemaining = Math.max(0, Math.ceil(msRemaining / (24 * 60 * 60 * 1000)));
+    return { daysRemaining, isExpired: msRemaining <= 0 };
+  };
+
+  // Transform accepted friends
+  const acceptedFriends: Friend[] = (friendsData ?? []).map((f) => {
     const friend = f.friend;
     if (!friend) return null;
     return {
       _id: friend._id,
+      friendshipId: f.friendship._id,
       name: friend.name,
       email: friend.email,
       phone: friend.phone,
       avatarUrl: friend.avatarUrl,
       initials: generateInitials(friend.name),
       color: generateAvatarColor(),
+      status: "accepted" as const,
     };
   }).filter((f): f is Friend => f !== null);
+
+  // Transform sent invitations into friends with pending/expired status
+  // These are people we invited - include them so we can split bills with them
+  const pendingFriends: Friend[] = (sentInvitationsData ?? []).map((inv) => {
+    const addressee = inv.addressee;
+    if (!addressee) return null;
+    const { daysRemaining, isExpired } = calculateExpiry(inv.friendship.expiresAt);
+    return {
+      _id: addressee._id,
+      friendshipId: inv.friendship._id,
+      name: addressee.name,
+      email: addressee.email,
+      phone: addressee.phone,
+      avatarUrl: addressee.avatarUrl,
+      initials: generateInitials(addressee.name),
+      color: generateAvatarColor(),
+      status: isExpired ? "expired" as const : "pending" as const,
+      expiresAt: inv.friendship.expiresAt,
+      daysRemaining,
+    };
+  }).filter((f): f is Friend => f !== null);
+
+  // Merge and sort: accepted first, then pending, then expired
+  const friends: Friend[] = [...acceptedFriends, ...pendingFriends].sort((a, b) => {
+    const statusOrder = { accepted: 0, pending: 1, expired: 2 };
+    return statusOrder[a.status] - statusOrder[b.status];
+  });
+
+  // Transform received invitations (people who invited us) - only show pending, not expired
+  const receivedInvitations: Invitation[] = (receivedInvitationsData ?? [])
+    .map((inv) => {
+      const requester = inv.requester;
+      if (!requester) return null;
+      const { daysRemaining, isExpired } = calculateExpiry(inv.friendship.expiresAt);
+      if (isExpired) return null; // Don't show expired received invitations
+      return {
+        friendshipId: inv.friendship._id,
+        user: {
+          _id: requester._id,
+          name: requester.name,
+          email: requester.email,
+          initials: generateInitials(requester.name),
+          color: generateAvatarColor(),
+        },
+        expiresAt: inv.friendship.expiresAt ?? Date.now(),
+        daysRemaining,
+        isExpired,
+      };
+    })
+    .filter((inv): inv is Invitation => inv !== null);
+
+  // Sent invitations for UI display (pending only - expired now show in friends list)
+  const sentInvitations: Invitation[] = (sentInvitationsData ?? [])
+    .map((inv) => {
+      const addressee = inv.addressee;
+      if (!addressee) return null;
+      const { daysRemaining, isExpired } = calculateExpiry(inv.friendship.expiresAt);
+      if (isExpired) return null; // Expired ones are now in the friends list
+      return {
+        friendshipId: inv.friendship._id,
+        user: {
+          _id: addressee._id,
+          name: addressee.name,
+          email: addressee.email,
+          initials: generateInitials(addressee.name),
+          color: generateAvatarColor(),
+        },
+        expiresAt: inv.friendship.expiresAt ?? Date.now(),
+        daysRemaining,
+        isExpired,
+      };
+    })
+    .filter((inv): inv is Invitation => inv !== null);
 
   const isLoading = bankAccountsData === undefined || friendsData === undefined;
 
@@ -183,13 +298,25 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     }));
   }, []);
 
-  const sendFriendRequest = useCallback(async (addresseeId: Id<"users">) => {
-    await sendFriendRequestMutation({ addresseeId });
-  }, [sendFriendRequestMutation]);
+  const sendFriendRequestByEmail = useCallback(async (email: string) => {
+    await sendFriendRequestByEmailMutation({ email });
+  }, [sendFriendRequestByEmailMutation]);
 
   const acceptFriendRequest = useCallback(async (friendshipId: Id<"friendships">) => {
     await acceptFriendRequestMutation({ friendshipId });
   }, [acceptFriendRequestMutation]);
+
+  const rejectFriendRequest = useCallback(async (friendshipId: Id<"friendships">) => {
+    await rejectFriendRequestMutation({ friendshipId });
+  }, [rejectFriendRequestMutation]);
+
+  const cancelSentRequest = useCallback(async (friendshipId: Id<"friendships">) => {
+    await cancelRequestMutation({ friendshipId });
+  }, [cancelRequestMutation]);
+
+  const reinviteFriend = useCallback(async (friendshipId: Id<"friendships">) => {
+    await reinviteMutation({ friendshipId });
+  }, [reinviteMutation]);
 
   const removeFriend = useCallback(async (friendshipId: Id<"friendships">) => {
     await removeFriendMutation({ friendshipId });
@@ -231,12 +358,17 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     ...state,
     bankAccounts,
     friends,
+    receivedInvitations,
+    sentInvitations,
     isLoading,
     openSettings,
     closeSettings,
     updateUser,
-    sendFriendRequest,
+    sendFriendRequestByEmail,
     acceptFriendRequest,
+    rejectFriendRequest,
+    cancelSentRequest,
+    reinviteFriend,
     removeFriend,
     openFriendForm,
     closeFriendForm,

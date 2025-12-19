@@ -16,6 +16,7 @@ import type * as model_friendships from "../model/friendships.js";
 import type * as model_splits from "../model/splits.js";
 import type * as model_transactions from "../model/transactions.js";
 import type * as model_users from "../model/users.js";
+import type * as seed from "../seed.js";
 import type * as splits from "../splits.js";
 import type * as transactions from "../transactions.js";
 import type * as users from "../users.js";
@@ -35,6 +36,7 @@ declare const fullApi: ApiFromModules<{
   "model/splits": typeof model_splits;
   "model/transactions": typeof model_transactions;
   "model/users": typeof model_users;
+  seed: typeof seed;
   splits: typeof splits;
   transactions: typeof transactions;
   users: typeof users;

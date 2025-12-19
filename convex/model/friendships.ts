@@ -1,6 +1,9 @@
 import { QueryCtx, MutationCtx } from "../_generated/server";
 import { Doc, Id } from "../_generated/dataModel";
 
+// 7 days in milliseconds
+const INVITATION_EXPIRY_MS = 7 * 24 * 60 * 60 * 1000;
+
 /**
  * Send a friend request to another user.
  */
@@ -17,7 +20,14 @@ export async function sendRequest(
     .first();
 
   if (existingAsRequester) {
-    throw new Error("Friend request already exists");
+    // If it's expired, delete and allow resending
+    if (existingAsRequester.status === "pending" && 
+        existingAsRequester.expiresAt && 
+        existingAsRequester.expiresAt < Date.now()) {
+      await ctx.db.delete(existingAsRequester._id);
+    } else {
+      throw new Error("Friend request already exists");
+    }
   }
 
   // Check reverse direction too
@@ -28,13 +38,21 @@ export async function sendRequest(
     .first();
 
   if (existingAsAddressee) {
-    throw new Error("Friend request already exists from this user");
+    // If it's expired, delete and allow sending
+    if (existingAsAddressee.status === "pending" && 
+        existingAsAddressee.expiresAt && 
+        existingAsAddressee.expiresAt < Date.now()) {
+      await ctx.db.delete(existingAsAddressee._id);
+    } else {
+      throw new Error("Friend request already exists from this user");
+    }
   }
 
   return await ctx.db.insert("friendships", {
     requesterId,
     addresseeId,
     status: "pending",
+    expiresAt: Date.now() + INVITATION_EXPIRY_MS,
   });
 }
 

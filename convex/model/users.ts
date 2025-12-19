@@ -25,6 +25,19 @@ export async function getByClerkId(
 }
 
 /**
+ * Get a user by their email.
+ */
+export async function getByEmail(
+  ctx: QueryCtx | MutationCtx,
+  email: string
+): Promise<Doc<"users"> | null> {
+  return await ctx.db
+    .query("users")
+    .withIndex("by_email", (q) => q.eq("email", email.toLowerCase()))
+    .first();
+}
+
+/**
  * Update a user's profile.
  */
 export async function updateProfile(

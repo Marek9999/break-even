@@ -106,3 +106,35 @@ export const remove = mutation({
     await Transactions.remove(ctx, transactionId);
   },
 });
+
+/**
+ * Bulk create transactions from Plaid sync.
+ * Handles deduplication via plaidTransactionId.
+ */
+export const bulkCreateFromPlaid = mutation({
+  args: {
+    bankAccountId: v.id("bankAccounts"),
+    transactions: v.array(
+      v.object({
+        merchant: v.string(),
+        amount: v.number(),
+        date: v.string(),
+        category: v.string(),
+        description: v.string(),
+        plaidTransactionId: v.string(),
+      })
+    ),
+  },
+  handler: async (ctx, { bankAccountId, transactions }) => {
+    const user = await Auth.requireUser(ctx);
+    // Verify user owns the bank account
+    await BankAccounts.verifyOwnership(ctx, bankAccountId, user._id);
+
+    return await Transactions.bulkCreateFromPlaid(
+      ctx,
+      user._id,
+      bankAccountId,
+      transactions
+    );
+  },
+});

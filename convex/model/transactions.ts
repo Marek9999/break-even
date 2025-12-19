@@ -64,9 +64,62 @@ export async function create(
     date: string;
     category: string;
     description: string;
+    plaidTransactionId?: string;
   }
 ): Promise<Id<"transactions">> {
   return await ctx.db.insert("transactions", data);
+}
+
+/**
+ * Get a transaction by Plaid Transaction ID.
+ */
+export async function getByPlaidTransactionId(
+  ctx: QueryCtx | MutationCtx,
+  plaidTransactionId: string
+): Promise<Doc<"transactions"> | null> {
+  return await ctx.db
+    .query("transactions")
+    .withIndex("by_plaidTransactionId", (q) => q.eq("plaidTransactionId", plaidTransactionId))
+    .first();
+}
+
+/**
+ * Bulk create transactions from Plaid sync.
+ * Skips transactions that already exist (by plaidTransactionId).
+ */
+export async function bulkCreateFromPlaid(
+  ctx: MutationCtx,
+  userId: Id<"users">,
+  bankAccountId: Id<"bankAccounts">,
+  transactions: Array<{
+    merchant: string;
+    amount: number;
+    date: string;
+    category: string;
+    description: string;
+    plaidTransactionId: string;
+  }>
+): Promise<{ created: number; skipped: number }> {
+  let created = 0;
+  let skipped = 0;
+
+  for (const txn of transactions) {
+    // Check if transaction already exists
+    const existing = await getByPlaidTransactionId(ctx, txn.plaidTransactionId);
+    if (existing) {
+      skipped++;
+      continue;
+    }
+
+    await ctx.db.insert("transactions", {
+      userId,
+      bankAccountId,
+      ...txn,
+    });
+    created++;
+  }
+
+  return { created, skipped };
 }
 
 /**
