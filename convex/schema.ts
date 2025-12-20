@@ -47,7 +47,8 @@ export default defineSchema({
     plaidAccountId: v.optional(v.string()),
   })
     .index("by_userId", ["userId"])
-    .index("by_plaidItemId", ["plaidItemId"]),
+    .index("by_plaidItemId", ["plaidItemId"])
+    .index("by_plaidAccountId", ["plaidAccountId"]),
 
   // Transactions - user's transactions from bank accounts
   transactions: defineTable({

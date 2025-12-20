@@ -26,6 +26,7 @@ interface BankAccount {
   accountType: "checking" | "savings" | "credit";
   balance: number;
   color: string;
+  plaidItemId?: string;
   plaidAccessToken?: string;
 }
 

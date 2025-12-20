@@ -63,7 +63,17 @@ export async function update(
 }
 
 /**
- * Create a bank account from Plaid data.
+ * Result type for createFromPlaid operation.
+ */
+export type CreateFromPlaidResult = {
+  accountId: Id<"bankAccounts">;
+  alreadyExisted: boolean;
+  bankName: string;
+};
+
+/**
+ * Create a bank account from Plaid data, or return existing if already linked.
+ * This is idempotent - re-linking the same account won't create duplicates.
  */
 export async function createFromPlaid(
   ctx: MutationCtx,
@@ -78,8 +88,44 @@ export async function createFromPlaid(
     plaidAccessToken: string;
     plaidAccountId: string;
   }
-): Promise<Id<"bankAccounts">> {
-  return await ctx.db.insert("bankAccounts", data);
+): Promise<CreateFromPlaidResult> {
+  console.log(`[createFromPlaid] Checking for existing account with plaidAccountId: ${data.plaidAccountId}`);
+  
+  // Check if this account already exists for this user
+  const existingAccount = await getByPlaidAccountId(ctx, data.plaidAccountId);
+  
+  console.log(`[createFromPlaid] Found existing account:`, existingAccount ? {
+    id: existingAccount._id,
+    bankName: existingAccount.bankName,
+    plaidAccountId: existingAccount.plaidAccountId,
+    userId: existingAccount.userId,
+  } : null);
+  
+  if (existingAccount && existingAccount.userId === data.userId) {
+    console.log(`[createFromPlaid] Account already exists! Updating access token and balance.`);
+    // Account already exists - update the access token (it may have changed)
+    // and update the balance
+    await ctx.db.patch(existingAccount._id, {
+      plaidAccessToken: data.plaidAccessToken,
+      balance: data.balance,
+    });
+    
+    return {
+      accountId: existingAccount._id,
+      alreadyExisted: true,
+      bankName: existingAccount.bankName,
+    };
+  }
+  
+  console.log(`[createFromPlaid] Creating new account for ${data.bankName}`);
+  // Create new account
+  const accountId = await ctx.db.insert("bankAccounts", data);
+  
+  return {
+    accountId,
+    alreadyExisted: false,
+    bankName: data.bankName,
+  };
 }
 
 /**
@@ -92,6 +138,19 @@ export async function getByPlaidItemId(
   return await ctx.db
     .query("bankAccounts")
     .withIndex("by_plaidItemId", (q) => q.eq("plaidItemId", plaidItemId))
+    .first();
+}
+
+/**
+ * Get a bank account by Plaid Account ID.
+ */
+export async function getByPlaidAccountId(
+  ctx: QueryCtx | MutationCtx,
+  plaidAccountId: string
+): Promise<Doc<"bankAccounts"> | null> {
+  return await ctx.db
+    .query("bankAccounts")
+    .withIndex("by_plaidAccountId", (q) => q.eq("plaidAccountId", plaidAccountId))
     .first();
 }
 

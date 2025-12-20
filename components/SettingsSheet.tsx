@@ -35,7 +35,6 @@ import {
   Send,
   UserPlus,
   RefreshCw,
-  Wallet,
 } from "lucide-react";
 import { PlaidLink } from "@/components/PlaidLink";
 import { useState } from "react";
@@ -70,6 +69,12 @@ export function SettingsSheet() {
   const [isSendingInvite, setIsSendingInvite] = useState(false);
   const [processingInvitationId, setProcessingInvitationId] = useState<string | null>(null);
   const [removingFriendId, setRemovingFriendId] = useState<string | null>(null);
+
+  // Filter out Cash accounts (virtual accounts for manual transactions)
+  // These should only appear in the transaction filter dropdown, not in Settings
+  const connectedBankAccounts = bankAccounts.filter(
+    (account) => !(account.bankName === "Cash" && !account.plaidItemId)
+  );
 
   const handleSendInvite = async () => {
     if (!inviteEmail.trim()) return;
@@ -243,63 +248,51 @@ export function SettingsSheet() {
               </div>
 
               <div className="space-y-2">
-                {bankAccounts.map((account) => {
-                  const isCashAccount = account.bankName === "Cash" && !account.plaidItemId;
-                  return (
-                    <Card key={account._id} className="p-4">
-                      <div className="flex items-center gap-4">
-                        <div
-                          className={`flex items-center justify-center w-12 h-12 rounded-xl ${account.color} text-white`}
-                        >
-                          {isCashAccount ? (
-                            <Wallet className="h-6 w-6" />
-                          ) : account.accountType === "credit" ? (
-                            <CreditCard className="h-6 w-6" />
-                          ) : (
-                            <Landmark className="h-6 w-6" />
-                          )}
-                        </div>
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2">
-                            <p className="font-semibold text-stone-900">{account.bankName}</p>
-                            <Badge variant="outline" className="text-xs capitalize">
-                              {isCashAccount ? "Manual" : account.accountType}
-                            </Badge>
-                          </div>
-                          {!isCashAccount && (
-                            <p className="text-sm text-stone-500">
-                              •••• {account.accountNumberLast4}
-                            </p>
-                          )}
-                          {isCashAccount && (
-                            <p className="text-sm text-stone-500">
-                              For manual transactions
-                            </p>
-                          )}
-                        </div>
-                        <div className="text-right mr-2">
-                          <p className="font-semibold text-stone-900">
-                            {formatCurrency(account.balance)}
-                          </p>
-                          <p className="text-xs text-stone-400">Balance</p>
-                        </div>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 text-stone-400 hover:text-red-500 hover:bg-red-50"
-                          onClick={() => handleRemoveBankAccount(account)}
-                          disabled={deletingAccountId === account._id}
-                        >
-                          {deletingAccountId === account._id ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <Trash2 className="h-4 w-4" />
-                          )}
-                        </Button>
+                {connectedBankAccounts.map((account) => (
+                  <Card key={account._id} className="p-4">
+                    <div className="flex items-center gap-4">
+                      <div
+                        className={`flex items-center justify-center w-12 h-12 rounded-xl ${account.color} text-white`}
+                      >
+                        {account.accountType === "credit" ? (
+                          <CreditCard className="h-6 w-6" />
+                        ) : (
+                          <Landmark className="h-6 w-6" />
+                        )}
                       </div>
-                    </Card>
-                  );
-                })}
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2">
+                          <p className="font-semibold text-stone-900">{account.bankName}</p>
+                          <Badge variant="outline" className="text-xs capitalize">
+                            {account.accountType}
+                          </Badge>
+                        </div>
+                        <p className="text-sm text-stone-500">
+                          •••• {account.accountNumberLast4}
+                        </p>
+                      </div>
+                      <div className="text-right mr-2">
+                        <p className="font-semibold text-stone-900">
+                          {formatCurrency(account.balance)}
+                        </p>
+                        <p className="text-xs text-stone-400">Balance</p>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-stone-400 hover:text-red-500 hover:bg-red-50"
+                        onClick={() => handleRemoveBankAccount(account)}
+                        disabled={deletingAccountId === account._id}
+                      >
+                        {deletingAccountId === account._id ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Trash2 className="h-4 w-4" />
+                        )}
+                      </Button>
+                    </div>
+                  </Card>
+                ))}
 
                 <PlaidLink variant="outline" className="w-full" />
               </div>

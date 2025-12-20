@@ -6,7 +6,7 @@ import { useMutation } from "convex/react";
 import { useAuth } from "@clerk/nextjs";
 import { api } from "@/convex/_generated/api";
 import { Button } from "@/components/ui/button";
-import { Plus, Loader2, Link2, CheckCircle2 } from "lucide-react";
+import { Plus, Loader2, Link2, CheckCircle2, AlertCircle } from "lucide-react";
 
 // Generate a random color for the bank account card
 const ACCOUNT_COLORS = [
@@ -45,6 +45,7 @@ export function PlaidLink({
   const [isExchanging, setIsExchanging] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [warningMessage, setWarningMessage] = useState<string | null>(null);
 
   const createFromPlaid = useMutation(api.bankAccounts.createFromPlaid);
   const bulkCreateTransactions = useMutation(api.transactions.bulkCreateFromPlaid);
@@ -96,6 +97,7 @@ export function PlaidLink({
     async (publicToken: string) => {
       setIsExchanging(true);
       setError(null);
+      setWarningMessage(null);
 
       try {
         // Step 1: Exchange public token for access token
@@ -110,10 +112,12 @@ export function PlaidLink({
           throw new Error("Failed to link bank account");
         }
 
-        // Step 2: Create bank accounts in Convex
-        const createdAccounts: Array<{ id: string; accessToken: string }> = [];
+        // Step 2: Create bank accounts in Convex (with duplicate detection)
+        const newAccounts: Array<{ id: string; accessToken: string; bankName: string }> = [];
+        const existingAccounts: Array<{ bankName: string }> = [];
+        
         for (const account of exchangeData.accounts) {
-          const accountId = await createFromPlaid({
+          const result = await createFromPlaid({
             bankName: account.bankName,
             accountNumberLast4: account.accountNumberLast4,
             accountType: account.accountType,
@@ -123,14 +127,20 @@ export function PlaidLink({
             plaidAccessToken: account.plaidAccessToken,
             plaidAccountId: account.plaidAccountId,
           });
-          createdAccounts.push({
-            id: accountId,
-            accessToken: account.plaidAccessToken,
-          });
+          
+          if (result.alreadyExisted) {
+            existingAccounts.push({ bankName: result.bankName });
+          } else {
+            newAccounts.push({
+              id: result.accountId,
+              accessToken: account.plaidAccessToken,
+              bankName: result.bankName,
+            });
+          }
         }
 
-        // Step 3: Sync transactions for each account
-        for (const account of createdAccounts) {
+        // Step 3: Only sync transactions for newly created accounts
+        for (const account of newAccounts) {
           const syncResponse = await fetch("/api/plaid/sync-transactions", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -160,9 +170,30 @@ export function PlaidLink({
           }
         }
 
-        setSuccessMessage(`Successfully linked ${createdAccounts.length} account(s)!`);
-        setTimeout(() => setSuccessMessage(null), 3000);
-        onSuccess?.();
+        // Generate appropriate feedback message
+        const totalAccounts = newAccounts.length + existingAccounts.length;
+        
+        if (existingAccounts.length === totalAccounts) {
+          // All accounts already existed
+          setWarningMessage(
+            totalAccounts === 1
+              ? "This account is already linked"
+              : `All ${totalAccounts} account(s) are already linked`
+          );
+          setTimeout(() => setWarningMessage(null), 4000);
+        } else if (existingAccounts.length > 0) {
+          // Mix of new and existing
+          setSuccessMessage(
+            `Linked ${newAccounts.length} new account(s). ${existingAccounts.length} already linked.`
+          );
+          setTimeout(() => setSuccessMessage(null), 4000);
+          onSuccess?.();
+        } else {
+          // All new accounts
+          setSuccessMessage(`Successfully linked ${newAccounts.length} account(s)!`);
+          setTimeout(() => setSuccessMessage(null), 3000);
+          onSuccess?.();
+        }
       } catch (err) {
         console.error("Error during Plaid flow:", err);
         setError("Failed to link bank account. Please try again.");
@@ -176,9 +207,16 @@ export function PlaidLink({
   const { open, ready } = usePlaidLink({
     token: linkToken,
     onSuccess: handleOnSuccess,
-    onExit: (err) => {
+    onExit: (err, metadata) => {
+      console.log("Plaid Link exit metadata:", metadata);
       if (err) {
-        console.error("Plaid Link exit error:", err);
+        console.error("Plaid Link exit error:", {
+          error_type: err.error_type,
+          error_code: err.error_code,
+          error_message: err.error_message,
+          display_message: err.display_message,
+        });
+        setError(err.display_message || err.error_message || "Bank connection failed");
       }
     },
   });
@@ -201,6 +239,16 @@ export function PlaidLink({
       <Button variant={variant} size={size} className={className} disabled>
         <CheckCircle2 className="mr-2 h-4 w-4 text-green-500" />
         {successMessage}
+      </Button>
+    );
+  }
+
+  // Show warning message (accounts already linked)
+  if (warningMessage) {
+    return (
+      <Button variant={variant} size={size} className={className} disabled>
+        <AlertCircle className="mr-2 h-4 w-4 text-amber-500" />
+        {warningMessage}
       </Button>
     );
   }

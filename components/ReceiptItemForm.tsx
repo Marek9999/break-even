@@ -9,9 +9,10 @@ import { Plus } from "lucide-react";
 
 interface ReceiptItemFormProps {
   onItemAdded?: () => void;
+  remainingAmount?: number;
 }
 
-export function ReceiptItemForm({ onItemAdded }: ReceiptItemFormProps) {
+export function ReceiptItemForm({ onItemAdded, remainingAmount }: ReceiptItemFormProps) {
   const { addReceiptItem } = useSplit();
   const [name, setName] = useState("");
   const [quantity, setQuantity] = useState("1");
@@ -77,7 +78,11 @@ export function ReceiptItemForm({ onItemAdded }: ReceiptItemFormProps) {
             step="0.01"
             value={price}
             onChange={(e) => setPrice(e.target.value)}
-            placeholder="0.00"
+            placeholder={
+              remainingAmount !== undefined && remainingAmount > 0
+                ? `${remainingAmount.toFixed(2)} left`
+                : "0.00"
+            }
             className="mt-1"
           />
         </div>

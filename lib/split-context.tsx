@@ -123,6 +123,7 @@ interface SplitContextType extends SplitState {
   updateParticipantAmount: (friendId: string, amount: number) => void;
   updateParticipantPercentage: (friendId: string, percentage: number) => void;
   addReceiptItem: (item: Omit<ReceiptItem, "id">) => void;
+  addReceiptItems: (items: Omit<ReceiptItem, "id">[]) => void;
   updateReceiptItem: (id: string, item: Partial<ReceiptItem>) => void;
   removeReceiptItem: (id: string) => void;
   assignItemToPerson: (itemId: string, friendId: string) => void;
@@ -343,6 +344,17 @@ export function SplitProvider({ children }: { children: ReactNode }) {
     setState((prev) => ({
       ...prev,
       receiptItems: [...prev.receiptItems, newItem],
+    }));
+  }, []);
+
+  const addReceiptItems = useCallback((items: Omit<ReceiptItem, "id">[]) => {
+    const newItems: ReceiptItem[] = items.map((item, index) => ({
+      ...item,
+      id: `item-${Date.now()}-${index}-${Math.random().toString(36).substr(2, 9)}`,
+    }));
+    setState((prev) => ({
+      ...prev,
+      receiptItems: [...prev.receiptItems, ...newItems],
     }));
   }, []);
 
@@ -613,6 +625,7 @@ export function SplitProvider({ children }: { children: ReactNode }) {
     updateParticipantAmount,
     updateParticipantPercentage,
     addReceiptItem,
+    addReceiptItems,
     updateReceiptItem,
     removeReceiptItem,
     assignItemToPerson,
